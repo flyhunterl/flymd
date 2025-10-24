@@ -19,21 +19,10 @@ flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目
 
 ## 📸 界面预览
 
-```
-┌────────────────────────────────────────────────────┐
-│ 文件  保存  另存为  预览  新建  最近         未命名 │
-├────────────────────────────────────────────────────┤
-│                                                    │
-│  # 在此输入 Markdown 文本                          │
-│                                                    │
-│  - 列表项 1                                        │
-│  - 列表项 2                                        │
-│                                                    │
-│                                                    │
-├────────────────────────────────────────────────────┤
-│ 行 1, 列 1                                         │
-└────────────────────────────────────────────────────┘
-```
+<div style="display: flex; justify-content: center; flex-wrap: wrap; gap: 10px;">
+  <img width="450" alt="image" src="https://github.com/user-attachments/assets/2aed5cf6-344e-4b3c-a88d-d1dd0b4154fb" />
+  <img width="450" alt="image" src="https://github.com/user-attachments/assets/c738d2df-b363-4ce8-98b1-b738a3474ade" />
+</div>
 
 *界面风格类似 Windows 记事本，采用纯文本菜单栏设计*
 
