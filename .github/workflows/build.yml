@@ -3,9 +3,8 @@ name: Build Multi-Platform
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+    tags:
+      - 'v*'
 
 jobs:
   build:
