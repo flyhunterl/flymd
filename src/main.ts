@@ -7,6 +7,8 @@
 */
 
 import './style.css'
+// 引入 KaTeX 样式，用于公式渲染
+import 'katex/dist/katex.min.css'
 
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
@@ -29,6 +31,7 @@ const RECENT_MAX = 5
 // 渲染器（延迟初始化，首次进入预览时创建）
 let md: MarkdownIt | null = null
 let hljsLoaded = false
+let mermaidReady = false
 
 // 应用状态
 let mode: Mode = 'edit'
@@ -241,11 +244,10 @@ if (containerEl) {
     <div class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
       <div class="about-header">
         <div id="about-title">关于 flyMD</div>
-        <button id="about-close" class="about-close" title="关闭">✕</button>
+        <button id="about-close" class="about-close" title="关闭">×</button>
       </div>
       <div class="about-body">
-        <p>一款多平台的极致简洁、即开即用的 Markdown 文档编辑预览工具。</p>
-
+        <p>一个跨平台的轻量级、稳定易用的 Markdown 文档编辑预览工具。</p>
         <div class="about-subtitle">快捷键</div>
         <div class="about-shortcuts">
           <div class="sc-act">打开文件</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>O</kbd></div>
@@ -253,17 +255,19 @@ if (containerEl) {
           <div class="sc-act">另存为</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></div>
           <div class="sc-act">新建</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>N</kbd></div>
           <div class="sc-act">编辑/预览</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>E</kbd></div>
-          <div class="sc-act">退出预览/关闭关于</div><div class="sc-keys"><kbd>Esc</kbd></div>
+          <div class="sc-act">插入链接</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>K</kbd></div>
+          <div class="sc-act">加粗</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>B</kbd></div>
+          <div class="sc-act">斜体</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>I</kbd></div>
+          <div class="sc-act">退出预览/关闭弹窗</div><div class="sc-keys"><kbd>Esc</kbd></div>
         </div>
         <div class="about-links">
-          <p>作者网站：<a href="https://www.llingfei.com" target="_blank" rel="noopener noreferrer">https://www.llingfei.com</a></p>
+          <p>个人网站：<a href="https://www.llingfei.com" target="_blank" rel="noopener noreferrer">https://www.llingfei.com</a></p>
           <p>GitHub 地址：<a href="https://github.com/flyhunterl/flymd" target="_blank" rel="noopener noreferrer">https://github.com/flyhunterl/flymd</a></p>
         </div>
       </div>
     </div>
   `
   containerEl.appendChild(about)
-  // 在关于对话框底部右侧添加版本信息
   try {
     const overlay = document.getElementById('about-overlay') as HTMLDivElement | null
     const dialog = overlay?.querySelector('.about-dialog') as HTMLDivElement | null
@@ -283,27 +287,6 @@ if (containerEl) {
       if (verEl) verEl.textContent = `v${version}`
     }
   } catch {}
-}
-
-// 初始化存储
-async function initStore() {
-  try {
-    console.log('初始化应用存储...')
-    // Tauri v2：使用 Store.load 并由后端在 app_data_dir 下持久化
-    store = await Store.load('flymd-settings.json')
-    console.log('存储初始化成功')
-    // 存储初始化后才记录日志
-    void logInfo('应用存储初始化成功')
-    return true
-  } catch (error) {
-    console.error('存储初始化失败:', error)
-    console.warn('将以无持久化模式运行（浏览器模式或 Tauri 未就绪）')
-    void logWarn('存储初始化失败，以内存模式运行', error)
-    // 不抛出错误，允许应用继续运行
-    return false
-  }
-}
-
 // 更新标题和未保存标记
 function refreshTitle() {
   const name = currentFilePath ? currentFilePath.split(/[/\\]/).pop() : '未命名'
@@ -321,6 +304,23 @@ function refreshStatus() {
   status.textContent = `行 ${row}, 列 ${col}`
 }
 
+// 初始化存储（Tauri Store），失败则退化为内存模式
+async function initStore() {
+  try {
+    console.log('初始化应用存储...')
+    // Tauri v2 使用 Store.load，在应用数据目录下持久化
+    store = await Store.load('flymd-settings.json')
+    console.log('存储初始化成功')
+    void logInfo('应用存储初始化成功')
+    return true
+  } catch (error) {
+    console.error('存储初始化失败:', error)
+    console.warn('将以无持久化（内存）模式运行')
+    void logWarn('存储初始化失败：使用内存模式', error)
+    return false
+  }
+}
+
 // 延迟加载高亮库并创建 markdown-it
 async function ensureRenderer() {
   if (md) return
@@ -332,6 +332,11 @@ async function ensureRenderer() {
       html: false,
       linkify: true,
       highlight(code, lang) {
+        // Mermaid 代码块保留为占位容器，稍后由 mermaid 渲染
+        if (lang && lang.toLowerCase() === 'mermaid') {
+          const esc = code.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]!))
+          return `<pre class="mermaid">${esc}</pre>`
+        }
         try {
           if (lang && hljs.default.getLanguage(lang)) {
             const r = hljs.default.highlight(code, { language: lang, ignoreIllegals: true })
@@ -342,6 +347,13 @@ async function ensureRenderer() {
         return `<pre><code class="hljs">${esc}</code></pre>`
       }
     })
+    // 启用 KaTeX 支持（$...$ / $$...$$）
+    try {
+      const katexPlugin = (await import('markdown-it-katex')).default as any
+      if (typeof katexPlugin === 'function') md.use(katexPlugin)
+    } catch (e) {
+      console.warn('markdown-it-katex 加载失败：', e)
+    }
   }
 }
 
@@ -365,7 +377,6 @@ async function renderPreview() {
       try {
         const el = img as HTMLImageElement
         const src = el.getAttribute('src') || ''
-        if (!src) return
         // 跳过已可用的协议
         if (/^(data:|blob:|asset:|https?:)/i.test(src)) return
         if (!base) return
@@ -388,6 +399,56 @@ async function renderPreview() {
       } catch {}
     })
   } catch {}
+
+  // Mermaid 渲染：标准化为 <div class="mermaid"> 后逐个渲染为 SVG
+  try {
+    // 情况1：<pre><code class="language-mermaid">...</code></pre>
+    preview.querySelectorAll('pre > code.language-mermaid').forEach((code) => {
+      try {
+        const pre = code.parentElement as HTMLElement
+        const text = code.textContent || ''
+        const div = document.createElement('div')
+        div.className = 'mermaid'
+        div.textContent = text
+        pre.replaceWith(div)
+      } catch {}
+    })
+
+        const text = pre.textContent || ''
+    preview.querySelectorAll('pre.mermaid').forEach((pre) => {
+    preview.querySelectorAll('pre.mermaid').forEach((pre) => {
+      try {
+        const text = pre.textContent || ''
+        div.className = 'mermaid'
+        div.textContent = text
+        pre.replaceWith(div)
+      } catch {}
+    })
+
+    const nodes = Array.from(preview.querySelectorAll('.mermaid')) as HTMLElement[]
+    if (nodes.length > 0) {
+      const mermaid = (await import('mermaid')).default
+      if (!mermaidReady) {
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
+        mermaidReady = true
+      }
+      for (let i = 0; i < nodes.length; i++) {
+        const el = nodes[i]
+        const code = el.textContent || '
+        try {
+          const { svg } = await mermaid.render(`mmd-${Date.now()}-${i}`, code)
+          const wrap = document.createElement('div')
+          wrap.innerHTML = svg
+          const svgEl = wrap.firstElementChild
+          if (svgEl) el.replaceWith(svgEl)
+        } catch (err) {
+          console.warn('Mermaid 单图渲染失败：', err)
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Mermaid 渲染失败：', e)
+  }
 }
 
 // 拖拽支持：
@@ -407,10 +468,45 @@ function insertAtCursor(text: string) {
   refreshStatus()
 }
 
+// 文本格式化与插入工具
+function wrapSelection(before: string, after: string, placeholder = ') {
+  const start = editor.selectionStart
+  const end = editor.selectionEnd
+  const val = editor.value
+  const selected = val.slice(start, end) || placeholder
+  const insert = `${before}${selected}${after}`
+  editor.value = val.slice(0, start) + insert + val.slice(end)
+  const selStart = start + before.length
+  const selEnd = selStart + selected.length
+  editor.selectionStart = selStart
+  editor.selectionEnd = selEnd
+  dirty = true
+  refreshTitle()
+  refreshStatus()
+}
+
+function formatBold() { wrapSelection('**', '**', '加粗文本') }
+function formatItalic() { wrapSelection('*', '*', '斜体文本') }
+async function insertLink() {
+  const start = editor.selectionStart
+  const end = editor.selectionEnd
+  const val = editor.value
+  const label = val.slice(start, end) || '链接文本'
+  const url = prompt('输入链接 URL：', 'https://') || '
+  if (!url) return
+  const insert = `[${label}](${url})`
+  editor.value = val.slice(0, start) + insert + val.slice(end)
+  const pos = start + insert.length
+  editor.selectionStart = editor.selectionEnd = pos
+  dirty = true
+  refreshTitle()
+  refreshStatus()
+}
+
 async function fileToDataUrl(file: File): Promise<string> {
   const buf = await file.arrayBuffer()
   const bytes = new Uint8Array(buf)
-  let bin = ''
+  let bin = '
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
   const b64 = btoa(bin)
   const mime = file.type || 'application/octet-stream'
@@ -607,7 +703,7 @@ async function newFile() {
     const confirmed = confirm('当前文件尚未保存，是否放弃更改并新建？')
     if (!confirmed) return
   }
-  editor.value = ''
+  editor.value = '
   currentFilePath = null
   dirty = false
   refreshTitle()
@@ -656,7 +752,7 @@ async function renderRecentPanel(toggle = true) {
           `<div class=\"path\">${p}</div>` +
           `</div>`
       )
-      .join('')
+      .join(')
   }
   // 绑定点击
   panel.querySelectorAll('.item').forEach((el) => {
@@ -737,12 +833,12 @@ function bindEvents() {
         }
         return
       }
-      const uriList = dt.getData('text/uri-list') || ''
-      const plain = dt.getData('text/plain') || ''
-      const cand = (uriList.split('\n').find((l) => /^https?:/i.test(l)) || '').trim() || plain.trim()
+      const uriList = dt.getData('text/uri-list') || '
+      const plain = dt.getData('text/plain') || '
+      const cand = (uriList.split('\n').find((l) => /^https?:/i.test(l)) || ').trim() || plain.trim()
       if (cand && /^https?:/i.test(cand)) {
         const isImg = extIsImage(cand)
-        insertAtCursor(`${isImg ? '!' : ''}[${isImg ? 'image' : 'link'}](${cand})`)
+        insertAtCursor(`${isImg ? '!' : '}[${isImg ? 'image' : 'link'}](${cand})`)
         if (mode === 'preview') await renderPreview()
       }
     } catch (err) {
@@ -760,6 +856,9 @@ function bindEvents() {
     if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); guard(saveAs)(); return }
     if (e.ctrlKey && e.key.toLowerCase() === 'n') { e.preventDefault(); guard(newFile)(); return }
     if (e.key === 'Escape' && mode === 'preview') { e.preventDefault(); guard(toggleMode)(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); guard(formatBold)(); if (mode === 'preview') void renderPreview(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'i') { e.preventDefault(); guard(formatItalic)(); if (mode === 'preview') void renderPreview(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'k') { e.preventDefault(); guard(insertLink)(); if (mode === 'preview') void renderPreview(); return }
   })
 
   // 关闭前确认（未保存）
@@ -855,6 +954,7 @@ function bindEvents() {
     }
   }
 })()
+
 
 
 

@@ -6,6 +6,7 @@ export default defineConfig({
     strictPort: false
   },
   build: {
-    target: 'es2020'
+    // 允许使用动态 import 带来的顶层 await 代码拆分
+    target: 'es2022'
   }
 })
