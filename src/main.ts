@@ -110,6 +110,18 @@ async function appendLog(level: LogLevel, message: string, details?: unknown) {
   }
 }
 
+// ����ȫ���쳣�ͱ����ܾ���־�� Tauri ����Ҳ�ɼ�
+try {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('error', (e: any) => {
+      try { void appendLog('ERROR', '��������', e?.error ?? e?.message ?? e) } catch {}
+    })
+    window.addEventListener('unhandledrejection', (e: any) => {
+      try { void appendLog('ERROR', 'Promise δ�������ܾ�', e?.reason ?? e) } catch {}
+    })
+  }
+} catch {}
+
 // 添加通用日志函数供其他地方调用
 function logInfo(message: string, details?: unknown) {
   void appendLog('INFO', message, details)
@@ -360,11 +372,23 @@ async function ensureRenderer() {
 
 // 渲染预览（带安全消毒）
 async function renderPreview() {
+  console.log('=== 开始渲染预览 ===')
   await ensureRenderer()
   const raw = editor.value
-  const safe = DOMPurify.sanitize(raw)
-  const html = md!.render(safe)
-  preview.innerHTML = html
+  const html = md!.render(raw)
+  console.log('Markdown 渲染后的 HTML 片段:', html.substring(0, 500))
+
+  // 配置 DOMPurify 允许 SVG 和 MathML
+  const safe = DOMPurify.sanitize(html, {
+    ADD_TAGS: ['svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'g', 'text', 'tspan', 'defs', 'marker', 'use', 'clipPath', 'mask', 'pattern', 'foreignObject'],
+    ADD_ATTR: ['viewBox', 'xmlns', 'fill', 'stroke', 'stroke-width', 'd', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'transform', 'class', 'id', 'style', 'points', 'preserveAspectRatio', 'markerWidth', 'markerHeight', 'refX', 'refY', 'orient', 'markerUnits', 'fill-opacity', 'stroke-dasharray'],
+    KEEP_CONTENT: true,
+    RETURN_DOM: false,
+    RETURN_DOM_FRAGMENT: false
+  })
+
+  console.log('DOMPurify 清理后的 HTML 片段:', safe.substring(0, 500))
+  preview.innerHTML = safe
   // 外链安全属性
   preview.querySelectorAll('a[href]').forEach((a) => {
     const el = a as HTMLAnchorElement
@@ -403,8 +427,11 @@ async function renderPreview() {
 
   // Mermaid 渲染：标准化为 <div class="mermaid"> 后逐个渲染为 SVG
   try {
+    console.log('=== 开始 Mermaid 渲染流程 ===')
     // 情况1：<pre><code class="language-mermaid">...</code></pre>
-    preview.querySelectorAll('pre > code.language-mermaid').forEach((code) => {
+    const codeBlocks = preview.querySelectorAll('pre > code.language-mermaid')
+    console.log('找到 language-mermaid 代码块数量:', codeBlocks.length)
+    codeBlocks.forEach((code) => {
       try {
         const pre = code.parentElement as HTMLElement
         const text = code.textContent || ''
@@ -416,7 +443,9 @@ async function renderPreview() {
     })
 
     // 情况2：<pre class="mermaid">...</pre>
-    preview.querySelectorAll('pre.mermaid').forEach((pre) => {
+    const preMermaid = preview.querySelectorAll('pre.mermaid')
+    console.log('找到 pre.mermaid 元素数量:', preMermaid.length)
+    preMermaid.forEach((pre) => {
       try {
         const text = pre.textContent || ''
         const div = document.createElement('div')
@@ -427,28 +456,55 @@ async function renderPreview() {
     })
 
     const nodes = Array.from(preview.querySelectorAll('.mermaid')) as HTMLElement[]
+    console.log(`找到 ${nodes.length} 个 Mermaid 节点`)
     if (nodes.length > 0) {
-      const mermaid = (await import('mermaid')).default
+      let mermaid: any
+      try {
+        mermaid = (await import('mermaid')).default
+      } catch (e1) {
+        console.warn('加载 mermaid 失败，尝试 ESM 备用路径...', e1)
+        try {
+          mermaid = (await import('mermaid/dist/mermaid.esm.mjs')).default
+        } catch (e2) {
+          console.error('mermaid ESM 备用路径也加载失败', e2)
+          throw e2
+        }
+      }
       if (!mermaidReady) {
         mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
         mermaidReady = true
+        console.log('Mermaid 已初始化')
       }
       for (let i = 0; i < nodes.length; i++) {
         const el = nodes[i]
         const code = el.textContent || ''
+        console.log(`渲染 Mermaid 图表 ${i + 1}:`, code.substring(0, 50))
         try {
           const { svg } = await mermaid.render(`mmd-${Date.now()}-${i}`, code)
+          console.log(`Mermaid 图表 ${i + 1} SVG 长度:`, svg.length)
+          console.log(`Mermaid 图表 ${i + 1} SVG 开头:`, svg.substring(0, 200))
           const wrap = document.createElement('div')
           wrap.innerHTML = svg
           const svgEl = wrap.firstElementChild
-          if (svgEl) el.replaceWith(svgEl)
+          console.log(`Mermaid 图表 ${i + 1} SVG 元素:`, svgEl?.tagName, svgEl?.getAttribute('viewBox'))
+          if (svgEl) {
+            el.replaceWith(svgEl)
+            console.log(`Mermaid 图表 ${i + 1} 渲染成功，已插入 DOM`)
+            // 检查是否还在 DOM 中
+            setTimeout(() => {
+              const check = document.querySelector(`#${svgEl.id}`)
+              console.log(`Mermaid 图表 ${i + 1} 检查 DOM 中是否存在:`, check ? '存在' : '不存在')
+            }, 100)
+          }
         } catch (err) {
-          console.warn('Mermaid 单图渲染失败：', err)
+          console.error('Mermaid 单图渲染失败：', err)
+          // 显示错误信息
+          el.innerHTML = `<div style="color: red; border: 1px solid red; padding: 10px;">Mermaid 渲染错误: ${err}</div>`
         }
       }
     }
   } catch (e) {
-    console.warn('Mermaid 渲染失败：', e)
+    console.error('Mermaid 渲染失败：', e)
   }
 }
 
@@ -926,6 +982,14 @@ function bindEvents() {
 
     // 尝试初始化存储（失败不影响启动）
     await initStore()
+
+    // 开发模式：自动打开 Devtools 便于采集日志
+    try {
+      // import.meta.env.DEV 在 Vite/Tauri dev 下为 true
+      if ((import.meta as any).env?.DEV) {
+        try { getCurrentWebview().openDevtools() } catch {}
+      }
+    } catch {}
 
     // 核心功能：必须执行
     refreshTitle()

@@ -10,6 +10,7 @@
   },
   "app": {
     "security": {
+      "csp": "default-src * 'unsafe-inline' 'unsafe-eval' data: blob: filesystem: ws: wss: http: https: ipc: asset:; img-src * data: blob: asset: http: https:; style-src * 'unsafe-inline' blob:; font-src * data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' http: https: data: blob:; worker-src * blob: data:; connect-src * ipc: http: https: ws: wss: data: blob: http://ipc.localhost; object-src *; base-uri *; form-action *",
       "capabilities": [
         {
           "identifier": "main-fs-user-files",
