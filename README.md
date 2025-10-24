@@ -2,9 +2,15 @@
 
 > 一款多平台的极致简洁即开即用的 Markdown 文档编辑预览工具
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
+
+## 更新 v0.1.1
+
+- 新增 LaTeX（基于 KaTeX）渲染支持
+- 新增 Mermaid 流程图/时序图等渲染支持
+- 新增快捷键：Ctrl+B 加粗、Ctrl+I 斜体、Ctrl+K 插入链接
 
 ## ✨ 项目定位
 
@@ -89,7 +95,7 @@ flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目
 #### 下载安装包（推荐）
 
 1. 前往 [Releases](https://github.com/flyhunterl/flymd/releases) 下载最新版本
-2. 运行 `flymd_0.1.0_x64_setup.exe` 安装
+2. 运行 `flymd_0.1.1_x64_setup.exe` 安装
 3. 启动 flyMD，开始使用
 
 
@@ -104,6 +110,9 @@ flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目
 | `Ctrl+Shift+S` | 另存为 |
 | `Ctrl+E` | 切换编辑/预览模式 |
 | `Escape` | 预览模式下返回编辑 |
+| `Ctrl+B` | 加粗 |
+| `Ctrl+I` | 斜体 |
+| `Ctrl+K` | 插入链接 |
 
 ## 📊 性能指标
 
@@ -134,7 +143,7 @@ flymd/
 
 ## 🗺️ 路线图
 
-### v0.1.0 (当前版本) ✅
+### v0.1.1 (当前版本) ✅
 - [x] 基础编辑与预览
 - [x] 文件打开/保存/另存为
 - [x] 快捷键支持
