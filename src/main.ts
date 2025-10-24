@@ -287,6 +287,7 @@ if (containerEl) {
       if (verEl) verEl.textContent = `v${version}`
     }
   } catch {}
+}
 // 更新标题和未保存标记
 function refreshTitle() {
   const name = currentFilePath ? currentFilePath.split(/[/\\]/).pop() : '未命名'
@@ -414,11 +415,11 @@ async function renderPreview() {
       } catch {}
     })
 
-        const text = pre.textContent || ''
-    preview.querySelectorAll('pre.mermaid').forEach((pre) => {
+    // 情况2：<pre class="mermaid">...</pre>
     preview.querySelectorAll('pre.mermaid').forEach((pre) => {
       try {
         const text = pre.textContent || ''
+        const div = document.createElement('div')
         div.className = 'mermaid'
         div.textContent = text
         pre.replaceWith(div)
@@ -434,7 +435,7 @@ async function renderPreview() {
       }
       for (let i = 0; i < nodes.length; i++) {
         const el = nodes[i]
-        const code = el.textContent || '
+        const code = el.textContent || ''
         try {
           const { svg } = await mermaid.render(`mmd-${Date.now()}-${i}`, code)
           const wrap = document.createElement('div')
@@ -469,7 +470,7 @@ function insertAtCursor(text: string) {
 }
 
 // 文本格式化与插入工具
-function wrapSelection(before: string, after: string, placeholder = ') {
+function wrapSelection(before: string, after: string, placeholder = '') {
   const start = editor.selectionStart
   const end = editor.selectionEnd
   const val = editor.value
@@ -492,7 +493,7 @@ async function insertLink() {
   const end = editor.selectionEnd
   const val = editor.value
   const label = val.slice(start, end) || '链接文本'
-  const url = prompt('输入链接 URL：', 'https://') || '
+  const url = prompt('输入链接 URL：', 'https://') || ''
   if (!url) return
   const insert = `[${label}](${url})`
   editor.value = val.slice(0, start) + insert + val.slice(end)
@@ -506,7 +507,7 @@ async function insertLink() {
 async function fileToDataUrl(file: File): Promise<string> {
   const buf = await file.arrayBuffer()
   const bytes = new Uint8Array(buf)
-  let bin = '
+  let bin = ''
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
   const b64 = btoa(bin)
   const mime = file.type || 'application/octet-stream'
@@ -703,7 +704,7 @@ async function newFile() {
     const confirmed = confirm('当前文件尚未保存，是否放弃更改并新建？')
     if (!confirmed) return
   }
-  editor.value = '
+  editor.value = ''
   currentFilePath = null
   dirty = false
   refreshTitle()
@@ -752,7 +753,7 @@ async function renderRecentPanel(toggle = true) {
           `<div class=\"path\">${p}</div>` +
           `</div>`
       )
-      .join(')
+      .join('')
   }
   // 绑定点击
   panel.querySelectorAll('.item').forEach((el) => {
@@ -833,12 +834,12 @@ function bindEvents() {
         }
         return
       }
-      const uriList = dt.getData('text/uri-list') || '
-      const plain = dt.getData('text/plain') || '
-      const cand = (uriList.split('\n').find((l) => /^https?:/i.test(l)) || ').trim() || plain.trim()
+      const uriList = dt.getData('text/uri-list') || ''
+      const plain = dt.getData('text/plain') || ''
+      const cand = (uriList.split('\n').find((l) => /^https?:/i.test(l)) || '').trim() || plain.trim()
       if (cand && /^https?:/i.test(cand)) {
         const isImg = extIsImage(cand)
-        insertAtCursor(`${isImg ? '!' : '}[${isImg ? 'image' : 'link'}](${cand})`)
+        insertAtCursor(`${isImg ? '!' : ''}[${isImg ? 'image' : 'link'}](${cand})`)
         if (mode === 'preview') await renderPreview()
       }
     } catch (err) {
