@@ -1,0 +1,47 @@
+name: Build (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install bundlers (NSIS + WiX)
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          choco install wixtoolset -y
+
+      - name: Install Tauri CLI (JS)
+        run: npm i -D @tauri-apps/cli@^2
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Generate icons from flymd.png
+        run: npx tauri icon ./flymd.png
+
+      - name: Build Tauri (Windows)
+        run: npm run tauri:build
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flymd-windows-bundles
+          path: |
+            src-tauri/target/release/bundle/**
+          if-no-files-found: error

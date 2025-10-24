@@ -1,0 +1,70 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "flymd",
+  "version": "0.1.0",
+  "identifier": "com.flymd",
+  "build": {
+    "beforeDevCommand": "vite",
+    "beforeBuildCommand": "vite build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "security": {
+      "capabilities": [
+        {
+          "identifier": "main-fs-user-files",
+          "description": "允许 main 窗口访问用户目录与常见目录的文件系统读写，并使用文件对话框与存储",
+          "windows": ["main"],
+          "permissions": [
+            "core:default",
+            "core:window:allow-close",
+            "core:window:allow-destroy",
+            "dialog:default",
+            "dialog:allow-open",
+            "dialog:allow-save",
+            "fs:allow-open",
+            "fs:allow-create",
+            "fs:allow-read",
+            "fs:allow-read-file",
+            "fs:allow-read-text-file",
+            "fs:allow-read-dir",
+            "fs:allow-write-text-file",
+            "fs:allow-home-read-recursive",
+            "fs:allow-home-write-recursive",
+            "fs:allow-desktop-read-recursive",
+            "fs:allow-desktop-write-recursive",
+            "fs:allow-document-read-recursive",
+            "fs:allow-document-write-recursive",
+            "fs:allow-download-read-recursive",
+            "fs:allow-download-write-recursive",
+            "fs:allow-exe-write-recursive",
+            "fs:allow-log-write-recursive",
+            "fs:allow-appdata-write-recursive",
+            "fs:allow-applocaldata-write-recursive",
+            "fs:allow-appconfig-write-recursive",
+            "store:default",
+            "window-state:default"
+          ]
+        }
+      ]
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "flymd",
+        "width": 960,
+        "height": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "visible": true,
+        "dragDropEnabled": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": ["icons/icon.ico"]
+  }
+}
