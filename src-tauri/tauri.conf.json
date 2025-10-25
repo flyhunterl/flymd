@@ -75,8 +75,7 @@
       {
         "ext": [
           "md",
-          "markdown",
-          "txt"
+          "markdown"
         ],
         "role": "Editor",
         "description": "Markdown 文档",
