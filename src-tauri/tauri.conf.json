@@ -52,7 +52,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "flymd",
+        "title": "飞速MarkDown",
         "width": 960,
         "height": 640,
         "resizable": true,

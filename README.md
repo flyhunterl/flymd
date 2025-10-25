@@ -1,4 +1,4 @@
-# flyMD
+# 飞速MarkDown【flyMD】
 
 > 一款多平台的极致简洁即开即用的 Markdown 文档编辑预览工具
 

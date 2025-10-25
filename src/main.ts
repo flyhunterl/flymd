@@ -255,7 +255,7 @@ if (containerEl) {
   about.innerHTML = `
     <div class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
       <div class="about-header">
-        <div id="about-title">关于 flyMD</div>
+        <div id="about-title">关于 飞速MarkDown (flyMD)</div>
         <button id="about-close" class="about-close" title="关闭">×</button>
       </div>
       <div class="about-body">
@@ -288,10 +288,10 @@ if (containerEl) {
       footer.className = 'about-footer'
       footer.innerHTML = '<div class="about-footer-links">\
 <a href="https://www.llingfei.com" target="_blank" rel="noopener noreferrer">\
-  <img class="favicon" src="https://icons.duckduckgo.com/ip3/www.llingfei.com.ico" alt="" referrerpolicy="no-referrer"/>作者博客\
+  <img class="favicon" src="https://icons.duckduckgo.com/ip3/www.llingfei.com.ico" alt="" referrerpolicy="no-referrer"/>博客\
 </a><span class="sep">·</span>\
 <a href="https://github.com/flyhunterl/flymd" target="_blank" rel="noopener noreferrer">\
-  <img class="favicon" src="https://icons.duckduckgo.com/ip3/github.com.ico" alt="" referrerpolicy="no-referrer"/>GitHub 地址\
+  <img class="favicon" src="https://icons.duckduckgo.com/ip3/github.com.ico" alt="" referrerpolicy="no-referrer"/>GitHub\
 </a></div><span id="about-version"></span>'
       dialog.appendChild(footer)
       const verEl = footer.querySelector('#about-version') as HTMLSpanElement | null
@@ -304,7 +304,7 @@ if (containerEl) {
 function refreshTitle() {
   const name = currentFilePath ? currentFilePath.split(/[/\\]/).pop() : '未命名'
   filenameLabel.textContent = name + (dirty ? ' *' : '')
-  document.title = `flymd - ${name}${dirty ? ' *' : ''}`
+  document.title = `飞速MarkDown - ${name}${dirty ? ' *' : ''}`
 }
 
 // 更新状态栏（行列）
@@ -978,7 +978,7 @@ function bindEvents() {
 // 启动
 (async () => {
   try {
-    console.log('flyMD 应用启动...')
+    console.log('flyMD (飞速MarkDown) 应用启动...')
 
     // 尝试初始化存储（失败不影响启动）
     await initStore()
@@ -1005,7 +1005,7 @@ function bindEvents() {
 
     setTimeout(() => editor.focus(), 0)
     console.log('应用初始化完成')
-    void logInfo('flyMD 应用初始化完成')
+    void logInfo('flyMD (飞速MarkDown) 应用初始化完成')
   } catch (error) {
     console.error('应用启动失败:', error)
     showError('应用启动失败', error)
