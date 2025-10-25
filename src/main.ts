@@ -1080,6 +1080,17 @@ function bindEvents() {
   }
 
   // 点击外部区域时关闭最近文件面板
+  // 浏览器/非 Tauri 环境下的关闭前确认兜底
+  try {
+    if (!isTauriRuntime()) {
+      window.addEventListener('beforeunload', (e) => {
+        if (dirty) {
+          e.preventDefault()
+          ;(e as any).returnValue = ''
+        }
+      })
+    }
+  } catch {}
   document.addEventListener('click', (e) => {
     const panel = document.getElementById('recent-panel') as HTMLDivElement
     if (!panel || panel.classList.contains('hidden')) return
