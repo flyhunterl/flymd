@@ -24,6 +24,7 @@
             "core:window:allow-close",
             "core:window:allow-destroy",
             "dialog:default",
+            "dialog:allow-ask",
             "dialog:allow-open",
             "dialog:allow-save",
             "fs:allow-open",

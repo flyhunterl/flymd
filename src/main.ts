@@ -14,7 +14,8 @@ import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 
 // Tauri 插件（v2）
-import { open, save } from '@tauri-apps/plugin-dialog'
+// Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
+import { open, save, ask } from '@tauri-apps/plugin-dialog'
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { Store } from '@tauri-apps/plugin-store'
 import { open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
@@ -144,6 +145,26 @@ function logWarn(message: string, details?: unknown) {
 
 function logDebug(message: string, details?: unknown) {
   void appendLog('DEBUG', message, details)
+}
+
+// 统一确认弹框：优先使用 Tauri 原生 ask；浏览器环境回退到 window.confirm
+async function confirmNative(message: string, title = '确认') : Promise<boolean> {
+  try {
+    if (isTauriRuntime() && typeof ask === 'function') {
+      try {
+        const ok = await ask(message, { title })
+        return !!ok
+      } catch {}
+    }
+    // 浏览器环境或 ask 不可用时的降级
+    try {
+      if (typeof confirm === 'function') return !!confirm(message)
+    } catch {}
+    // 最安全的默认：不执行破坏性操作
+    return false
+  } catch {
+    return false
+  }
 }
 
 // 将任意 open() 返回值归一化为可用于 fs API 的字符串路径
@@ -703,11 +724,8 @@ async function toggleMode() {
 async function openFile(preset?: string) {
   try {
     if (!preset && dirty) {
-      const confirmed = confirm('当前文件尚未保存，是否放弃更改并继续打开？')
-      if (!confirmed) {
-        logDebug('用户取消打开文件操作（未保存）')
-        return
-      }
+      const confirmed = await confirmNative('当前文件尚未保存，是否放弃更改并继续打开？', '打开文件')
+      if (!confirmed) { logDebug('用户取消打开文件操作（未保存）'); return }
     }
 
     if (!preset) {
@@ -761,11 +779,8 @@ async function openFile2(preset?: unknown) {
     }
 
     if (!preset && dirty) {
-      const confirmed = confirm('当前文件尚未保存，是否放弃更改并继续打开？')
-      if (!confirmed) {
-        logDebug('用户取消打开文件操作（未保存）')
-        return
-      }
+      const confirmed = await confirmNative('当前文件尚未保存，是否放弃更改并继续打开？', '打开文件')
+      if (!confirmed) { logDebug('用户取消打开文件操作（未保存）'); return }
     }
 
     if (!preset) {
@@ -873,7 +888,7 @@ async function saveAs() {
 // 新建
 async function newFile() {
   if (dirty) {
-    const confirmed = confirm('当前文件尚未保存，是否放弃更改并新建？')
+    const confirmed = await confirmNative('当前文件尚未保存，是否放弃更改并新建？', '新建文件')
     if (!confirmed) return
   }
   editor.value = ''
@@ -1005,7 +1020,10 @@ function bindEvents() {
             try {
               const content = evt.target?.result as string
               if (content !== null && content !== undefined) {
-                if (dirty && !confirm('当前文件未保存，是否放弃更改并打开拖拽的文件？')) return
+                if (dirty) {
+                  const ok = await confirmNative('当前文件尚未保存，是否放弃更改并打开拖拽的文件？', '打开文件')
+                  if (!ok) return
+                }
                 editor.value = content
                 currentFilePath = null
                 dirty = false
@@ -1066,12 +1084,25 @@ function bindEvents() {
   })
 
   // 关闭前确认（未保存）
+  // 注意：Windows 平台上在 onCloseRequested 中调用浏览器 confirm 可能被拦截/无效，
+  // 使用 Tauri 原生 ask 更稳定；必要时再降级到 confirm。
   try {
-    getCurrentWindow().onCloseRequested((event) => {
-      if (dirty) {
-        const leave = confirm('当前文件尚未保存，确认退出吗？')
-        if (!leave) {
-          event.preventDefault()
+    void getCurrentWindow().onCloseRequested(async (event) => {
+      if (!dirty) return
+      // 先阻止关闭，再进行异步确认，确保不会直接退出
+      event.preventDefault()
+      try {
+        // 原生确认对话框（不会导致 Explorer/外壳异常）
+        const ok = await ask('当前文件尚未保存，确认退出吗？', { title: '确认退出' })
+        if (ok) {
+          // 使用 destroy 跳过再次触发 CloseRequested，避免二次询问
+          try { await getCurrentWindow().destroy() } catch { /* 忽略 */ }
+        }
+      } catch (e) {
+        // 插件不可用或权限不足时，降级到浏览器 confirm
+        const leave = typeof confirm === 'function' ? confirm('当前文件尚未保存，确认退出吗？') : true
+        if (leave) {
+          try { await getCurrentWindow().destroy() } catch { /* 忽略 */ }
         }
       }
     })
@@ -1198,11 +1229,5 @@ function bindEvents() {
     }
   }
 })()
-
-
-
-
-
-
 
 
