@@ -98,6 +98,15 @@ async function appendLog(level: LogLevel, message: string, details?: unknown) {
       }
     }
 
+    // 优先尝试 AppLog / AppLocalData，成功则返回
+    try {
+      // @ts-ignore
+      const base1: BaseDirectory = (BaseDirectory as any).AppLog ?? BaseDirectory.AppLocalData
+      const f1 = await openFileHandle(LOG_NAME, { write: true, append: true, create: true, baseDir: base1 })
+      try { await f1.write(data) } finally { await f1.close() }
+      return
+    } catch {}
+
     // 优先尝试写入可执行文件同级目录
     let success = await tryWrite(BaseDirectory.Executable)
 
@@ -1095,7 +1104,8 @@ function bindEvents() {
     try {
       const mod = await import('@tauri-apps/api/event')
       if (typeof mod.listen === 'function') {
-        await mod.listen('tauri://file-drop', async (ev: any) => {
+        const DRAG_DROP = (mod as any)?.TauriEvent?.DRAG_DROP ?? 'tauri://drag-drop'
+        await getCurrentWindow().listen(DRAG_DROP, async (ev: any) => {
           try {
             const payload: any = ev?.payload ?? ev
             // 仅在真正 drop 时处理（避免 hover/cancel 噪声）
