@@ -957,15 +957,26 @@ function bindEvents() {
     try {
       const mod = await import('@tauri-apps/api/event')
       if (typeof mod.listen === 'function') {
-        await mod.listen('tauri://file-drop', (ev: any) => {
+        await mod.listen('tauri://file-drop', async (ev: any) => {
           try {
-            const payload = ev?.payload ?? ev
+            const payload: any = ev?.payload ?? ev
+            // 仅在真正 drop 时处理（避免 hover/cancel 噪声）
+            if (payload && typeof payload === 'object' && payload.action && payload.action !== 'drop') return
             const arr = Array.isArray(payload) ? payload : (payload?.paths || payload?.urls || payload?.files || [])
             const paths: string[] = (Array.isArray(arr) ? arr : []).map((p) => normalizePath(p))
-            const target = paths.find((p) => /\.(md|markdown|txt)$/i.test(p))
-            if (target) void openFile2(target)
+            const md = paths.find((p) => /\.(md|markdown|txt)$/i.test(p))
+            if (md) { void openFile2(md); return }
+            const imgs = paths.filter((p) => /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i.test(p))
+            if (imgs.length > 0) {
+              const toLabel = (p: string) => { const segs = p.split(/[\\/]+/); return segs[segs.length - 1] || 'image' }
+              const toMdUrl = (p: string) => `<${p}>`  // 使用尖括号包裹以兼容空格和反斜杠
+              const text = imgs.map((p) => `![${toLabel(p)}](${toMdUrl(p)})`).join('\n')
+              insertAtCursor(text)
+              if (mode === 'preview') await renderPreview()
+              return
+            }
           } catch (err) {
-            showError('文件拖放事件处理失败', err)
+            showError('文件拖拽事件处理失败', err)
           }
         })
         await mod.listen('open-file', (ev: any) => {
