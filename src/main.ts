@@ -877,6 +877,31 @@ function bindEvents() {
       if (!dt) return
       const files = Array.from(dt.files || [])
       if (files.length > 0) {
+        // 优先检查是否有 MD 文件（浏览器环境）
+        const mdFile = files.find((f) => /\.(md|markdown|txt)$/i.test(f.name))
+        if (mdFile) {
+          const reader = new FileReader()
+          reader.onload = async (evt) => {
+            try {
+              const content = evt.target?.result as string
+              if (content !== null && content !== undefined) {
+                if (dirty && !confirm('当前文件未保存，是否放弃更改并打开拖拽的文件？')) return
+                editor.value = content
+                currentFilePath = null
+                dirty = false
+                refreshTitle()
+                refreshStatus()
+                if (mode === 'preview') await renderPreview()
+              }
+            } catch (err) {
+              showError('读取拖拽的MD文件失败', err)
+            }
+          }
+          reader.onerror = () => showError('文件读取失败', reader.error)
+          reader.readAsText(mdFile, 'UTF-8')
+          return
+        }
+        // 处理图片
         const parts: string[] = []
         for (const f of files) {
           if (extIsImage(f.name) || (f.type && f.type.startsWith('image/'))) {
@@ -969,7 +994,7 @@ function bindEvents() {
             const imgs = paths.filter((p) => /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i.test(p))
             if (imgs.length > 0) {
               const toLabel = (p: string) => { const segs = p.split(/[\\/]+/); return segs[segs.length - 1] || 'image' }
-              const toMdUrl = (p: string) => `<${p}>`  // 使用尖括号包裹以兼容空格和反斜杠
+              const toMdUrl = (p: string) => typeof convertFileSrc === 'function' ? convertFileSrc(p) : p
               const text = imgs.map((p) => `![${toLabel(p)}](${toMdUrl(p)})`).join('\n')
               insertAtCursor(text)
               if (mode === 'preview') await renderPreview()
