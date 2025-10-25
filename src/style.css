@@ -103,7 +103,8 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 .preview blockquote { border-left: 3px solid var(--border); margin: 0.8em 0; padding: 4px 10px; color: var(--muted); }
 .preview table { border-collapse: collapse; }
 .preview table th, .preview table td { border: 1px solid var(--border); padding: 6px 8px; }
-.preview img { max-width: 70%; height: auto; display: block; margin: 8px auto; }
+.preview img { display: block; margin: 8px auto; }
+.preview img:not([width]):not([height]) { max-width: 70%; height: auto; }
 
 /* 最近文件 面板 */
 .recent-panel {

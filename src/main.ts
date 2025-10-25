@@ -342,7 +342,7 @@ async function ensureRenderer() {
     const hljs = await import('highlight.js')
     hljsLoaded = true
     md = new MarkdownIt({
-      html: false,
+      html: true,
       linkify: true,
       highlight(code, lang) {
         // Mermaid 代码块保留为占位容器，稍后由 mermaid 渲染
