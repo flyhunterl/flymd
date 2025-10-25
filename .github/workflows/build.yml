@@ -67,8 +67,12 @@ jobs:
 
       - name: Generate icons from flymd.png
         run: npx tauri icon ./flymd.png
-      - name: Build Tauri app
+      - name: Build Tauri app (Windows)
+        if: matrix.platform == 'windows-latest'
         run: npm run tauri:build -- --bundles nsis
+      - name: Build Tauri app (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: npm run tauri:build -- --bundles deb appimage
 
       - name: Create portable zip (Windows)
         if: matrix.platform == 'windows-latest'
