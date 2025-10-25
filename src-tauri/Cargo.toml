@@ -17,6 +17,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-store = "2"
 tauri-plugin-window-state = "2"
+tauri-plugin-single-instance = "2"
 
 [profile.release]
 panic = "abort"
@@ -24,3 +25,4 @@ codegen-units = 1
 opt-level = "z"
 lto = true
 strip = true
+

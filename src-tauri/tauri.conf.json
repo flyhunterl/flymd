@@ -15,7 +15,9 @@
         {
           "identifier": "main-fs-user-files",
           "description": "允许 main 窗口访问用户目录与常见目录的文件系统读写，并使用文件对话框与存储",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "core:default",
             "core:window:allow-close",
@@ -68,6 +70,19 @@
     "icon": [
       "icons/icon.png",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "md",
+          "markdown",
+          "txt"
+        ],
+        "role": "Editor",
+        "description": "Markdown 文档",
+        "mimeType": "text/markdown",
+        "name": "Markdown"
+      }
     ]
   }
 }

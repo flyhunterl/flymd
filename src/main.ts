@@ -968,6 +968,14 @@ function bindEvents() {
             showError('文件拖放事件处理失败', err)
           }
         })
+        await mod.listen('open-file', (ev: any) => {
+          try {
+            const payload = ev?.payload ?? ev
+            if (typeof payload === 'string' && payload) void openFile2(payload)
+          } catch (err) {
+            showError('打开方式参数处理失败', err)
+          }
+        })
       }
     } catch {
       // 非 Tauri 环境或事件 API 不可用，忽略
