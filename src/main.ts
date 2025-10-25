@@ -507,7 +507,7 @@ async function renderPreview() {
         const src = el.getAttribute('src') || ''
         // 跳过已可用的协议
         if (/^(data:|blob:|asset:|https?:)/i.test(src)) return
-        if (!base) return
+        if (!base && !(/^[a-zA-Z]:\\|^\\\\|^\//.test(src))) return
         let abs: string
         if (/^[a-zA-Z]:\\|^\\\\|^\//.test(src)) {
           abs = src
