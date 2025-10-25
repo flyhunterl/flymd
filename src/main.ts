@@ -244,7 +244,7 @@ if (menubar) {
   menubar.appendChild(aboutBtn)
 }
 const containerEl = document.querySelector('.container') as HTMLDivElement
-if (containerEl) {
+  if (containerEl) {
   const panel = document.createElement('div')
   panel.id = 'recent-panel'
   panel.className = 'recent-panel hidden'
@@ -281,8 +281,8 @@ if (containerEl) {
       </div>
     </div>
   `
-  containerEl.appendChild(about)
-  try {
+    containerEl.appendChild(about)
+    try {
     const overlay = document.getElementById('about-overlay') as HTMLDivElement | null
     const dialog = overlay?.querySelector('.about-dialog') as HTMLDivElement | null
     if (dialog) {
@@ -299,7 +299,100 @@ if (containerEl) {
       const verEl = footer.querySelector('#about-version') as HTMLSpanElement | null
       if (verEl) verEl.textContent = `v${APP_VERSION}`
     }
-  } catch {}
+    } catch {}
+
+    // 插入链接对话框：初始化并挂载到容器
+    const link = document.createElement('div')
+    link.id = 'link-overlay'
+    link.className = 'link-overlay hidden'
+    link.innerHTML = `
+      <div class="link-dialog" role="dialog" aria-modal="true" aria-labelledby="link-title">
+        <div class="link-header">
+          <div id="link-title">插入链接</div>
+          <button id="link-close" class="about-close" title="关闭">×</button>
+        </div>
+        <form class="link-body" id="link-form">
+          <label class="link-field">
+            <span>文本</span>
+            <input id="link-text" type="text" placeholder="链接文本" />
+          </label>
+          <label class="link-field">
+            <span>URL</span>
+            <input id="link-url" type="text" placeholder="https://" />
+          </label>
+          <div class="link-actions">
+            <button type="button" id="link-cancel">取消</button>
+            <button type="submit" id="link-ok">插入</button>
+          </div>
+        </form>
+      </div>
+    `
+    containerEl.appendChild(link)
+  }
+
+// 打开“插入链接”对话框的 Promise 控制器
+let linkDialogResolver: ((result: { label: string; url: string } | null) => void) | null = null
+
+function showLinkOverlay(show: boolean) {
+  const overlay = document.getElementById('link-overlay') as HTMLDivElement | null
+  if (!overlay) return
+  if (show) overlay.classList.remove('hidden')
+  else overlay.classList.add('hidden')
+}
+
+async function openLinkDialog(presetLabel: string, presetUrl = 'https://'): Promise<{ label: string; url: string } | null> {
+  const overlay = document.getElementById('link-overlay') as HTMLDivElement | null
+  const form = overlay?.querySelector('#link-form') as HTMLFormElement | null
+  const inputText = overlay?.querySelector('#link-text') as HTMLInputElement | null
+  const inputUrl = overlay?.querySelector('#link-url') as HTMLInputElement | null
+  const btnCancel = overlay?.querySelector('#link-cancel') as HTMLButtonElement | null
+  const btnClose = overlay?.querySelector('#link-close') as HTMLButtonElement | null
+
+  // 如果没有自定义对话框，降级使用 prompt（保持功能可用）
+  if (!overlay || !form || !inputText || !inputUrl) {
+    const url = prompt('输入链接 URL：', presetUrl) || ''
+    if (!url) return null
+    const label = presetLabel || '链接文本'
+    return { label, url }
+  }
+
+  inputText.value = presetLabel || '链接文本'
+  inputUrl.value = presetUrl
+
+  return new Promise((resolve) => {
+    // 清理并设置 resolver
+    linkDialogResolver = (result) => {
+      showLinkOverlay(false)
+      // 解除事件绑定（一次性）
+      try {
+        form.removeEventListener('submit', onSubmit)
+        btnCancel?.removeEventListener('click', onCancel)
+        btnClose?.removeEventListener('click', onCancel)
+        overlay.removeEventListener('click', onOverlayClick)
+      } catch {}
+      resolve(result)
+      linkDialogResolver = null
+    }
+
+    function onSubmit(e: Event) {
+      e.preventDefault()
+      const label = (inputText.value || '').trim() || '链接文本'
+      const url = (inputUrl.value || '').trim()
+      if (!url) { inputUrl.focus(); return }
+      linkDialogResolver && linkDialogResolver({ label, url })
+    }
+    function onCancel() { linkDialogResolver && linkDialogResolver(null) }
+    function onOverlayClick(e: MouseEvent) { if (e.target === overlay) onCancel() }
+
+    form.addEventListener('submit', onSubmit)
+    btnCancel?.addEventListener('click', onCancel)
+    btnClose?.addEventListener('click', onCancel)
+    overlay.addEventListener('click', onOverlayClick)
+
+    showLinkOverlay(true)
+    // 聚焦 URL 输入框，便于直接粘贴
+    setTimeout(() => inputUrl.focus(), 0)
+  })
 }
 // 更新标题和未保存标记
 function refreshTitle() {
@@ -549,10 +642,10 @@ async function insertLink() {
   const start = editor.selectionStart
   const end = editor.selectionEnd
   const val = editor.value
-  const label = val.slice(start, end) || '链接文本'
-  const url = prompt('输入链接 URL：', 'https://') || ''
-  if (!url) return
-  const insert = `[${label}](${url})`
+  const labelPreset = val.slice(start, end) || '链接文本'
+  const result = await openLinkDialog(labelPreset, 'https://')
+  if (!result || !result.url) return
+  const insert = `[${result.label}](${result.url})`
   editor.value = val.slice(0, start) + insert + val.slice(end)
   const pos = start + insert.length
   editor.selectionStart = editor.selectionEnd = pos
@@ -932,6 +1025,8 @@ function bindEvents() {
   // 快捷键
   window.addEventListener('keydown', (e) => {
     const aboutOverlay = document.getElementById('about-overlay') as HTMLDivElement | null
+    const linkOverlay = document.getElementById('link-overlay') as HTMLDivElement | null
+    if (e.key === 'Escape' && linkOverlay && !linkOverlay.classList.contains('hidden')) { e.preventDefault(); linkDialogResolver && linkDialogResolver(null); return }
     if (e.key === 'Escape' && aboutOverlay && !aboutOverlay.classList.contains('hidden')) { e.preventDefault(); showAbout(false); return }
     if (e.ctrlKey && e.key.toLowerCase() === 'e') { e.preventDefault(); guard(toggleMode)(); return }
     if (e.ctrlKey && e.key.toLowerCase() === 'o') { e.preventDefault(); guard(openFile2)(); return }
