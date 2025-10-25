@@ -22,6 +22,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import pkg from '../package.json'
+// 应用版本号（用于窗口标题/关于弹窗）
+const APP_VERSION: string = (pkg as any)?.version ?? '0.0.0'
 
 type Mode = 'edit' | 'preview'
 
@@ -255,7 +257,7 @@ if (containerEl) {
   about.innerHTML = `
     <div class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
       <div class="about-header">
-        <div id="about-title">关于 飞速MarkDown (flyMD)</div>
+        <div id="about-title">关于 飞速MarkDown (flyMD) v${APP_VERSION}</div>
         <button id="about-close" class="about-close" title="关闭">×</button>
       </div>
       <div class="about-body">
@@ -289,14 +291,13 @@ if (containerEl) {
       footer.innerHTML = '<div class="about-footer-links">\
 <a href="https://www.llingfei.com" target="_blank" rel="noopener noreferrer">\
   <img class="favicon" src="https://icons.duckduckgo.com/ip3/www.llingfei.com.ico" alt="" referrerpolicy="no-referrer"/>博客\
-</a><span class="sep">·</span>\
+</a><span class="sep">&nbsp;&nbsp;</span>\
 <a href="https://github.com/flyhunterl/flymd" target="_blank" rel="noopener noreferrer">\
   <img class="favicon" src="https://icons.duckduckgo.com/ip3/github.com.ico" alt="" referrerpolicy="no-referrer"/>GitHub\
 </a></div><span id="about-version"></span>'
       dialog.appendChild(footer)
       const verEl = footer.querySelector('#about-version') as HTMLSpanElement | null
-      const version = (pkg as any)?.version ?? '0.0.0'
-      if (verEl) verEl.textContent = `v${version}`
+      if (verEl) verEl.textContent = `v${APP_VERSION}`
     }
   } catch {}
 }
@@ -304,7 +305,7 @@ if (containerEl) {
 function refreshTitle() {
   const name = currentFilePath ? currentFilePath.split(/[/\\]/).pop() : '未命名'
   filenameLabel.textContent = name + (dirty ? ' *' : '')
-  document.title = `飞速MarkDown - ${name}${dirty ? ' *' : ''}`
+  document.title = `飞速MarkDown v${APP_VERSION} - ${name}${dirty ? ' *' : ''}`
 }
 
 // 更新状态栏（行列）
