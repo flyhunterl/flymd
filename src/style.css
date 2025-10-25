@@ -163,7 +163,7 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 .link-body { padding: 14px 16px 16px 16px; }
 .link-field { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; }
 .link-field span { color: var(--muted); }
-.link-field input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 8px; outline: none; font-size: 13px; }
+.link-field input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 8px; outline: none; font-size: 13px; min-width: 0; box-sizing: border-box; }
 .link-field input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
 .link-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 .link-actions button { -webkit-app-region: no-drag; cursor: pointer; border: 1px solid var(--border); background: rgba(127,127,127,0.08); color: var(--fg); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
