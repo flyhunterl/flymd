@@ -655,13 +655,26 @@ async function insertLink() {
 }
 
 async function fileToDataUrl(file: File): Promise<string> {
-  const buf = await file.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  let bin = ''
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-  const b64 = btoa(bin)
-  const mime = file.type || 'application/octet-stream'
-  return `data:${mime};base64,${b64}`
+  // 使用 FileReader 生成 data URL，避免手动拼接带来的内存与性能问题
+  return await new Promise<string>((resolve, reject) => {
+    try {
+      const fr = new FileReader()
+      fr.onerror = () => reject(fr.error || new Error('读取文件失败'))
+      fr.onload = () => resolve(String(fr.result || ''))
+      fr.readAsDataURL(file)
+    } catch (e) {
+      reject(e as any)
+    }
+  })
+}
+
+// 运行时环境检测（是否在 Tauri 中）
+function isTauriRuntime(): boolean {
+  try {
+    // Tauri v1/v2 均可通过以下全局标记判断
+    // @ts-ignore
+    return typeof window !== 'undefined' && (!!(window as any).__TAURI_INTERNALS__ || !!(window as any).__TAURI__)
+  } catch { return false }
 }
 
 // 切换模式
@@ -970,6 +983,10 @@ function bindEvents() {
       const dt = e.dataTransfer
       if (!dt) return
       const files = Array.from(dt.files || [])
+      // 在 Tauri 环境下，文件拖入统一交给 tauri://file-drop 处理，避免与 DOM 层重复
+      if (isTauriRuntime() && files.length > 0) {
+        return
+      }
       if (files.length > 0) {
         // 优先检查是否有 MD 文件（浏览器环境）
         const mdFile = files.find((f) => /\.(md|markdown|txt)$/i.test(f.name))
@@ -1090,7 +1107,8 @@ function bindEvents() {
             const imgs = paths.filter((p) => /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i.test(p))
             if (imgs.length > 0) {
               const toLabel = (p: string) => { const segs = p.split(/[\\/]+/); return segs[segs.length - 1] || 'image' }
-              const toMdUrl = (p: string) => typeof convertFileSrc === 'function' ? convertFileSrc(p) : p
+              // 直接插入原始本地路径；预览阶段会自动转换为 asset: 以便显示
+              const toMdUrl = (p: string) => /[\s()]/.test(p) ? `<${p}>` : p
               const text = imgs.map((p) => `![${toLabel(p)}](${toMdUrl(p)})`).join('\n')
               insertAtCursor(text)
               if (mode === 'preview') await renderPreview()
