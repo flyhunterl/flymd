@@ -218,3 +218,44 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 .upl-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 .upl-actions button { -webkit-app-region: no-drag; cursor: pointer; border: 1px solid var(--border); background: rgba(127,127,127,0.08); color: var(--fg); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
 .upl-actions button:hover { background: rgba(127,127,127,0.14); }
+
+/* === UI 美化补充（库侧栏与图床设置）=== */
+/* 库侧栏：行高、箭头、图标配色与悬停态 */
+.library .lib-node { min-height: 26px; gap: 8px; padding: 4px 8px; }
+.library .lib-node .lib-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library .lib-node .lib-tg { width: 14px; height: 14px; color: var(--muted); transition: transform .12s ease; }
+.library .lib-node.expanded .lib-tg { transform: rotate(90deg); color: var(--fg); }
+.library .lib-ico { width: 16px; height: 16px; color: var(--muted); fill: currentColor; }
+.library .lib-node:hover .lib-ico { color: var(--fg); }
+.library .lib-ico-folder { color: #f59e0b; } /* 简约点缀色：琥珀 */
+@media (prefers-color-scheme: dark) {
+  .library .lib-ico-folder { color: #fbbf24; }
+}
+/* 替换文件图标为简约 SVG，保留旧类避免破坏布局 */
+.library .lib-ico-file { width: 14px; height: 16px; display: inline-block; }
+
+/* 树形缩进更柔和 */
+.library .lib-children { margin-left: 16px; border-left: 1px dashed rgba(127,127,127,0.2); padding-left: 6px; }
+
+/* 图床设置弹窗：分组与描述、开关样式、提示文案 */
+.upl-desc { margin: 8px 16px 0 16px; font-size: 12px; color: var(--muted); }
+.upl-section-title { grid-column: 1 / -1; margin: 12px 0 4px 0; font-weight: 600; font-size: 12px; color: var(--fg); opacity: .9; }
+.upl-hint { grid-column: 2 / -1; margin: 4px 0 2px 0; font-size: 12px; color: var(--muted); }
+
+/* 简约开关（复用 checkbox）*/
+.switch { position: relative; width: 38px; height: 22px; display: inline-block; }
+.switch input { display: none; }
+.switch .trk { position: absolute; inset: 0; background: rgba(127,127,127,0.25); border-radius: 999px; transition: background-color .12s ease; }
+.switch .kn { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--bg); box-shadow: 0 1px 2px rgba(0,0,0,.15); transition: transform .12s ease; }
+.switch input:checked + .trk { background: #2563eb; }
+.switch input:checked + .trk + .kn { transform: translateX(16px); }
+
+/* 操作区按钮语义色 */
+.upl-actions .btn-secondary { border-color: var(--border); background: rgba(127,127,127,0.08); }
+.upl-actions .btn-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+.upl-actions .btn-primary:hover { filter: brightness(1.05); }
+
+/* 测试结果 */
+#upl-test-result { margin-left: auto; font-size: 12px; color: var(--muted); }
+#upl-test-result.ok { color: #16a34a; }
+#upl-test-result.err { color: #dc2626; }

@@ -424,41 +424,52 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
         <div id="upl-title">图床设置（S3 / R2）</div>
         <button id="upl-close" class="about-close" title="关闭">×</button>
       </div>
+      <div class="upl-desc">用于将粘贴/拖拽的图片自动上传到对象存储，保存后即生效（仅在启用时）。</div>
       <form class="upl-body" id="upl-form">
         <div class="upl-grid">
+          <div class="upl-section-title">基础配置</div>
           <label for="upl-enabled">启用</label>
-          <div class="upl-field"><input id="upl-enabled" type="checkbox" /></div>
-
+          <div class="upl-field">
+            <label class="switch">
+              <input id="upl-enabled" type="checkbox" />
+              <span class="trk"></span><span class="kn"></span>
+            </label>
+          </div>
           <label for="upl-ak">AccessKeyId</label>
           <div class="upl-field"><input id="upl-ak" type="text" placeholder="必填" /></div>
-
           <label for="upl-sk">SecretAccessKey</label>
           <div class="upl-field"><input id="upl-sk" type="password" placeholder="必填" /></div>
-
           <label for="upl-bucket">Bucket</label>
           <div class="upl-field"><input id="upl-bucket" type="text" placeholder="必填" /></div>
-
           <label for="upl-endpoint">自定义节点地址</label>
-          <div class="upl-field"><input id="upl-endpoint" type="url" placeholder="例如 https://xxx.r2.cloudflarestorage.com" /></div>
-
+          <div class="upl-field">
+            <input id="upl-endpoint" type="url" placeholder="例如 https://xxx.r2.cloudflarestorage.com" />
+            <div class="upl-hint">R2: https://<accountid>.r2.cloudflarestorage.com；S3: https://s3.<region>.amazonaws.com</div>
+          </div>
           <label for="upl-region">Region（可选）</label>
-          <div class="upl-field"><input id="upl-region" type="text" placeholder="R2 填 auto；S3 如 ap-southeast-1" /></div>
-
+          <div class="upl-field"><input id="upl-region" type="text" placeholder="R2 用 auto；S3 如 ap-southeast-1" /></div>
+          <div class="upl-section-title">访问域名与路径</div>
           <label for="upl-domain">自定义域名</label>
-          <div class="upl-field"><input id="upl-domain" type="url" placeholder="例如 https://img.example.com" /></div>
-
+          <div class="upl-field">
+            <input id="upl-domain" type="url" placeholder="例如 https://img.example.com" />
+            <div class="upl-hint">填写后将使用该域名生成公开地址</div>
+          </div>
           <label for="upl-template">上传路径模板</label>
-          <div class="upl-field"><input id="upl-template" type="text" placeholder="{year}/{month}{fileName}{md5}.{extName}" /></div>
-
+          <div class="upl-field">
+            <input id="upl-template" type="text" placeholder="{year}/{month}{fileName}{md5}.{extName}" />
+            <div class="upl-hint">可用变量：{year}{month}{day}{fileName}{md5}{extName}</div>
+          </div>
+          <div class="upl-section-title">高级选项</div>
           <label for="upl-pathstyle">Path-Style（R2 建议）</label>
           <div class="upl-field"><input id="upl-pathstyle" type="checkbox" /></div>
-
           <label for="upl-acl">public-read</label>
           <div class="upl-field"><input id="upl-acl" type="checkbox" checked /></div>
         </div>
         <div class="upl-actions">
-          <button type="button" id="upl-cancel">取消</button>
-          <button type="submit" id="upl-save">保存</button>
+          <div id="upl-test-result"></div>
+          <button type="button" id="upl-test" class="btn-secondary">测试连接</button>
+          <button type="button" id="upl-cancel" class="btn-secondary">取消</button>
+          <button type="submit" id="upl-save" class="btn-primary">保存</button>
         </div>
       </form>
     </div>
@@ -524,6 +535,38 @@ async function openLinkDialog(presetLabel: string, presetUrl = 'https://'): Prom
     btnCancel?.addEventListener('click', onCancel)
     btnClose?.addEventListener('click', onCancel)
     overlay.addEventListener('click', onOverlayClick)
+  // 测试连接事件
+  if (btnTest) btnTest.addEventListener('click', guard(async () => {
+    if (!overlay) return
+    const ep = (overlay.querySelector('#upl-endpoint') as HTMLInputElement)?.value || ''
+    if (testRes) { testRes.textContent = '测试中...'; (testRes as any).className = ''; testRes.id = 'upl-test-result' }
+    try {
+      const res = await testUploaderConnectivity(ep)
+      if (testRes) {
+        testRes.textContent = res.ok ? `可达 (status: ${res.status}) — ${res.note}` : `不可达 — ${res.note}`
+        ;(testRes as any).className = res.ok ? 'ok' : 'err'
+        testRes.id = 'upl-test-result'
+      }
+    } catch (e: any) {
+      if (testRes) { testRes.textContent = e?.message || '测试失败'; (testRes as any).className = 'err'; testRes.id = 'upl-test-result' }
+    }
+  }))
+  // 测试连接事件
+  if (btnTest) btnTest.addEventListener('click', guard(async () => {
+    if (!overlay) return
+    const ep = (overlay.querySelector('#upl-endpoint') as HTMLInputElement)?.value || ''
+    if (testRes) { testRes.textContent = '测试中...'; (testRes as any).className = ''; testRes.id = 'upl-test-result' }
+    try {
+      const res = await testUploaderConnectivity(ep)
+      if (testRes) {
+        testRes.textContent = res.ok ? `可达 (status: ${res.status}) — ${res.note}` : `不可达 — ${res.note}`
+        ;(testRes as any).className = res.ok ? 'ok' : 'err'
+        testRes.id = 'upl-test-result'
+      }
+    } catch (e: any) {
+      if (testRes) { testRes.textContent = e?.message || '测试失败'; (testRes as any).className = 'err'; testRes.id = 'upl-test-result' }
+    }
+  }))
 
     showLinkOverlay(true)
     // 聚焦 URL 输入框，便于直接粘贴
@@ -1240,6 +1283,29 @@ function showUploaderOverlay(show: boolean) {
   else overlay.classList.add('hidden')
 }
 
+
+// 简单的连通性测试：只验证 Endpoint 可达性（不进行真实上传）
+async function testUploaderConnectivity(endpoint: string): Promise<{ ok: boolean; status: number; note: string }> {
+  try {
+    const ep = (endpoint || "").trim()
+    if (!ep) return { ok: false, status: 0, note: "请填写 Endpoint" }
+    let u: URL
+    try { u = new URL(ep) } catch { return { ok: false, status: 0, note: "Endpoint 非法 URL" } }
+    const origin = u.origin
+    try {
+      const mod: any = await import("@tauri-apps/plugin-http")
+      if (mod && typeof mod.fetch === "function") {
+        const r = await mod.fetch(origin, { method: "HEAD" })
+        const ok = r && (r.ok === true || (typeof r.status === "number" && r.status >= 200 && r.status < 500))
+        return { ok, status: r?.status ?? 0, note: ok ? "可访问" : "不可访问" }
+      }
+    } catch {}
+    try {
+      const r2 = await fetch(origin as any, { method: "HEAD" as any, mode: "no-cors" as any } as any)
+      return { ok: true, status: 0, note: "已发起网络请求" }
+    } catch (e: any) { return { ok: false, status: 0, note: e?.message || "网络失败" } }
+  } catch (e: any) { return { ok: false, status: 0, note: e?.message || "异常" } }
+}
 async function openUploaderDialog() {
   const overlay = document.getElementById('uploader-overlay') as HTMLDivElement | null
   const form = overlay?.querySelector('#upl-form') as HTMLFormElement | null
@@ -1257,6 +1323,8 @@ async function openUploaderDialog() {
   const inputAcl = overlay.querySelector('#upl-acl') as HTMLInputElement
   const btnCancel = overlay.querySelector('#upl-cancel') as HTMLButtonElement
   const btnClose = overlay.querySelector('#upl-close') as HTMLButtonElement
+  const btnTest = overlay.querySelector('#upl-test') as HTMLButtonElement
+  const testRes = overlay.querySelector('#upl-test-result') as HTMLDivElement
 
   // 预填
   try {
@@ -1418,19 +1486,19 @@ async function renderLibraryRoot() {
   pathEl.textContent = root
   const top = document.createElement('div')
   top.className = 'lib-node lib-dir'
-  top.innerHTML = `<span class="lib-toggle">v</span><svg class="lib-ico lib-ico-dir" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="lib-name">${root.split(/[\\/]+/).pop() || root}</span>`
+  top.innerHTML = `<svg class="lib-tg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><svg class="lib-ico lib-ico-folder" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a 2 2 0 0 1 2-2h4l2 2h8a 2 2 0 0 1 2 2v7a 2 2 0 0 1-2 2H5a 2 2 0 0 1-2-2V7z"/></svg><span class="lib-name">${root.split(/[\\/]+/).pop() || root}</span>`
   const children = document.createElement('div')
   children.className = 'lib-children'
   treeEl.appendChild(top)
   treeEl.appendChild(children)
+  top.classList.add('expanded')
   await renderDir(children as HTMLDivElement, root)
 
   let expanded = true
   top.addEventListener('click', async () => {
     expanded = !expanded
     children.style.display = expanded ? '' : 'none'
-    const tg = top.querySelector('.lib-toggle') as HTMLSpanElement | null
-    if (tg) tg.textContent = expanded ? 'v' : '>'
+    top.classList.toggle('expanded', expanded)
     if (expanded && children.childElementCount === 0) {
       await renderDir(children as HTMLDivElement, root)
     }
@@ -1444,7 +1512,7 @@ async function renderDir(container: HTMLDivElement, dir: string) {
     if (e.isDir) {
       const row = document.createElement('div')
       row.className = 'lib-node lib-dir'
-      row.innerHTML = `<span class="lib-toggle">></span><svg class="lib-ico lib-ico-dir" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="lib-name">${e.name}</span>`
+      row.innerHTML = `<svg class="lib-tg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><svg class="lib-ico lib-ico-folder" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a 2 2 0 0 1 2-2h4l2 2h8a 2 2 0 0 1 2 2v7a 2 2 0 0 1-2 2H5a 2 2 0 0 1-2-2V7z"/></svg><span class="lib-name">${e.name}</span>`
       const kids = document.createElement('div')
       kids.className = 'lib-children'
       kids.style.display = 'none'
@@ -1454,8 +1522,7 @@ async function renderDir(container: HTMLDivElement, dir: string) {
       row.addEventListener('click', async () => {
         expanded = !expanded
         kids.style.display = expanded ? '' : 'none'
-        const tg = row.querySelector('.lib-toggle') as HTMLSpanElement | null
-        if (tg) tg.textContent = expanded ? 'v' : '>'
+         row.classList.toggle('expanded', expanded)
         if (expanded && kids.childElementCount === 0) {
           await renderDir(kids as HTMLDivElement, e.path)
         }
@@ -1463,7 +1530,7 @@ async function renderDir(container: HTMLDivElement, dir: string) {
     } else {
       const row = document.createElement('div')
       row.className = 'lib-node lib-file'
-      row.innerHTML = `<span class="lib-ico lib-ico-file"></span><span class="lib-name">${e.name}</span>`
+      row.innerHTML = `<svg class="lib-ico lib-ico-file" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5"/></svg><span class="lib-name">${e.name}</span>`
       row.title = e.path
       row.addEventListener('click', async () => {
         await openFile2(e.path)
@@ -1520,6 +1587,25 @@ function bindEvents() {
   }))
   if (btnAbout) btnAbout.addEventListener('click', guard(() => showAbout(true)))
   if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
+
+  // 绑定全局点击（图床弹窗测试按钮）
+  document.addEventListener('click', async (ev) => {
+    const t = ev?.target as HTMLElement
+    if (t && t.id === 'upl-test') {
+      ev.preventDefault()
+      const overlay = document.getElementById('uploader-overlay') as HTMLDivElement | null
+      const testRes = overlay?.querySelector('#upl-test-result') as HTMLDivElement | null
+      const ep = (overlay?.querySelector('#upl-endpoint') as HTMLInputElement)?.value || ''
+      if (testRes) { testRes.textContent = '测试中...'; (testRes as any).className = ''; testRes.id = 'upl-test-result' }
+      try {
+        const res = await testUploaderConnectivity(ep)
+        if (testRes) { testRes.textContent = res.ok ? '可达' : '不可达'; (testRes as any).className = res.ok ? 'ok' : 'err' }
+      } catch (e: any) {
+        if (testRes) { testRes.textContent = '测试失败'; (testRes as any).className = 'err' }
+      }
+    }
+  })
+
 
   // 文本变化
   editor.addEventListener('input', () => {
