@@ -28,7 +28,7 @@
 </p>
 <p align="center">
   <img src="https://github.com/user-attachments/assets/7f1e9179-6087-4abf-80d5-7965dbbf2600" width="32%" alt="Markdown Editor Screenshot 4"/>
-  <img src="https://github.com/user-attachments/assets/8d549446-6052-4c32-88f8-f47331447fd" width="32%" alt="Markdown Editor Screenshot 5"/>
+  <img src="https://github.com/user-attachments/assets/8d549446-6052-4c32-88f8-f473314476fd" width="32%" alt="Markdown Editor Screenshot 5"/>  <!-- 这里已经修正啦！ -->
   <img src="https://github.com/user-attachments/assets/4283312d-5ff6-43a7-a537-ef503e48604e" width="32%" alt="Markdown Editor Screenshot 6"/>
 </p>
 
