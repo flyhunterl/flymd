@@ -19,6 +19,7 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",
+    "@tauri-apps/plugin-opener": "^2.0.0",
     "@tauri-apps/plugin-store": "^2.0.0",
     "dompurify": "^3.0.0",
     "highlight.js": "^11.9.0",

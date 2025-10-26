@@ -512,7 +512,8 @@ async function renderPreview() {
   })
 
   console.log('DOMPurify 清理后的 HTML 片段:', safe.substring(0, 500))
-  preview.innerHTML = safe
+  // 包裹一层容器，用于样式定宽居中显示
+  preview.innerHTML = `<div class="preview-body">${safe}</div>`
   // 外链安全属性
   preview.querySelectorAll('a[href]').forEach((a) => {
     const el = a as HTMLAnchorElement

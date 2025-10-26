@@ -91,6 +91,12 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 }
 .preview.hidden { display: none; }
 
+/* 预览正文容器：定宽居中，类似 Typora/Word 的阅读宽度 */
+.preview-body {
+  max-width: 860px;   /* 可按需微调，例如 720/800/900 */
+  margin: 0 auto;
+}
+
 .statusbar {
   position: absolute; right: 10px; bottom: 8px; font-size: 12px; color: var(--muted);
 }

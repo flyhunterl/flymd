@@ -48,6 +48,7 @@
             "fs:allow-applocaldata-write-recursive",
             "fs:allow-appconfig-write-recursive",
             "store:default",
+            "opener:default",
             "window-state:default"
           ]
         }
