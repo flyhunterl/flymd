@@ -12,7 +12,7 @@
 ## ✨ 项目特色
 
 
-- 即开即用：安装包仅6MB 拒绝臃肿。冷启动毫秒级响应，无启动画面/欢迎页 
+- 即开即用：安装包仅6MB 拒绝臃肿。冷启动毫秒级响应，代码一键复制
 - 界面干净：极简界面，默认仅菜单栏+编辑区，专注内容创作 启动速度和响应速度优秀
 - 文库功能：支持指定文件夹，树状目录显示文件夹下子文件夹及文档 并支持文档管理
 - 安全可靠：本地运行，无网络连接，预览 HTML 自动消毒 
@@ -20,12 +20,9 @@
 
 
 ## 📸 界面预览
-
-<div style="display: flex; justify-content: center; flex-wrap: wrap; gap: 10px;">
-  <img width="450" alt="image" src="https://github.com/user-attachments/assets/2aed5cf6-344e-4b3c-a88d-d1dd0b4154fb" />
-  <img width="450" alt="image" src="https://github.com/user-attachments/assets/c738d2df-b363-4ce8-98b1-b738a3474ade" />
-</div>
-
+<img width="962" height="672" alt="image" src="https://github.com/user-attachments/assets/917ad246-1208-4585-9e10-7d2da54f2eef" />
+<img width="960" height="640" alt="image" src="https://github.com/user-attachments/assets/97012b2d-4457-434d-a436-cdba796d25b4" />
+<img width="962" height="672" alt="image" src="https://github.com/user-attachments/assets/39343b06-3c54-4990-a198-e5f941da6578" />
 
 
 ## 🎯 核心特性
