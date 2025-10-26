@@ -430,6 +430,34 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
   `
   containerEl.appendChild(link)
 
+  // 重命名对话框（样式复用“插入链接”对话框风格）
+  const rename = document.createElement('div')
+  rename.id = 'rename-overlay'
+  rename.className = 'link-overlay hidden'
+  rename.innerHTML = `
+      <div class="link-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+        <div class="link-header">
+          <div id="rename-title">重命名</div>
+          <button id="rename-close" class="about-close" title="关闭">×</button>
+        </div>
+        <form class="link-body" id="rename-form">
+          <label class="link-field">
+            <span>名称</span>
+            <input id="rename-text" type="text" placeholder="请输入新名称" />
+          </label>
+          <label class="link-field">
+            <span>后缀</span>
+            <input id="rename-ext" type="text" disabled />
+          </label>
+          <div class="link-actions">
+            <button type="button" id="rename-cancel">取消</button>
+            <button type="submit" id="rename-ok">确定</button>
+          </div>
+        </form>
+    </div>
+  `
+  containerEl.appendChild(rename)
+
   // 图床设置对话框
   const upl = document.createElement('div')
   upl.id = 'uploader-overlay'
@@ -503,6 +531,37 @@ function showLinkOverlay(show: boolean) {
   else overlay.classList.add('hidden')
 }
 
+async function openRenameDialog(stem: string, ext: string): Promise<string | null> {
+  try {
+    const overlay = document.getElementById('rename-overlay') as HTMLDivElement | null
+    const form = overlay?.querySelector('#rename-form') as HTMLFormElement | null
+    const inputText = overlay?.querySelector('#rename-text') as HTMLInputElement | null
+    const inputExt = overlay?.querySelector('#rename-ext') as HTMLInputElement | null
+    const btnCancel = overlay?.querySelector('#rename-cancel') as HTMLButtonElement | null
+    const btnClose = overlay?.querySelector('#rename-close') as HTMLButtonElement | null
+    if (!overlay || !form || !inputText || !inputExt) {
+      const v = prompt('重命名为（不含后缀）：', stem) || ''
+      return v.trim() || null
+    }
+    inputText.value = stem
+    inputExt.value = ext
+    return await new Promise<string | null>((resolve) => {
+      const onSubmit = (e: Event) => { e.preventDefault(); const v = (inputText.value || '').trim(); resolve(v || null); cleanup() }
+      const onCancel = () => { resolve(null); cleanup() }
+      const onOverlay = (e: MouseEvent) => { if (e.target === overlay) onCancel() }
+      function cleanup() {
+        overlay.classList.add('hidden')
+        try { form.removeEventListener('submit', onSubmit); btnCancel?.removeEventListener('click', onCancel); btnClose?.removeEventListener('click', onCancel); overlay.removeEventListener('click', onOverlay) } catch {}
+      }
+      form.addEventListener('submit', onSubmit)
+      btnCancel?.addEventListener('click', onCancel)
+      btnClose?.addEventListener('click', onCancel)
+      overlay.addEventListener('click', onOverlay)
+      overlay.classList.remove('hidden')
+      setTimeout(() => inputText.focus(), 0)
+    })
+  } catch { return null }
+}
 async function openLinkDialog(presetLabel: string, presetUrl = 'https://'): Promise<{ label: string; url: string } | null> {
   const overlay = document.getElementById('link-overlay') as HTMLDivElement | null
   const form = overlay?.querySelector('#link-form') as HTMLFormElement | null
@@ -1545,7 +1604,31 @@ async function renameFileSafe(p: string, newName: string): Promise<string> {
   await moveFileSafe(p, dst)
   return dst
 }
-async function deleteFileSafe(p: string): Promise<void> { try { await remove(p) } catch (e) { throw e } }
+// 安全删除：优先直接删除；若为目录或遇到占用异常，尝试递归删除目录内容后再删
+async function deleteFileSafe(p: string): Promise<void> {
+  try {
+    await remove(p)
+    return
+  } catch (e1) {
+    try {
+      const st: any = await stat(p)
+      const isDir = !!st?.isDirectory
+      if (!isDir) throw e1
+      // 目录：递归删除子项
+      try {
+        const ents = (await readDir(p, { recursive: false } as any)) as any[]
+        for (const it of ents) {
+          const child = typeof it?.path === 'string' ? it.path : (p + (p.includes('\\') ? '\\' : '/') + (it?.name || ''))
+          await deleteFileSafe(child)
+        }
+      } catch {}
+      await remove(p)
+      return
+    } catch {
+      throw e1
+    }
+  }
+}
 async function newFileSafe(dir: string, name = '新建文档.md'): Promise<string> {
   const sep = dir.includes('\\') ? '\\' : '/'
   let n = name, i = 1
@@ -1676,8 +1759,8 @@ function bindEvents() {
     const onDoc = () => hide()
     menu.innerHTML = ''
     if (isDir) { menu.appendChild(mkItem('在此新建文档', async () => { try { const p2 = await newFileSafe(path); await openFile2(p2); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {}; const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; const n2 = Array.from((document.getElementById('lib-tree')||document.body).querySelectorAll('.lib-node.lib-dir') as any).find((n:any) => n.dataset?.path === path); if (n2) n2.dispatchEvent(new MouseEvent('click', { bubbles: true })) } catch (e) { showError('新建失败', e) } })) }
-    menu.appendChild(mkItem('重命名', async () => { try { const base = path.replace(/[\\/][^\\/]*$/, ''); const oldName = path.split(/[\\/]+/).pop() || ''; const name = window.prompt('重命名为：', oldName) || ''; if (!name || name === oldName) return; const dst = base + (base.includes('\\') ? '\\' : '/') + name; if (await exists(dst)) { alert('同名已存在'); return } await moveFileSafe(path, dst); if (currentFilePath === path) { currentFilePath = dst as any; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('重命名失败', e) } }))
-    menu.appendChild(mkItem('删除', async () => { try { const ok = await ask('确定删除？不可恢复'); if (!ok) return; await deleteFileSafe(path); if (currentFilePath === path) { await fileTree.newFileInSelected(); mode = 'edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('删除失败', e) } }))
+    menu.appendChild(mkItem('重命名', async () => { try { const base = path.replace(/[\\/][^\\/]*$/, ''); const oldFull = path.split(/[\\/]+/).pop() || ''; const m = oldFull.match(/^(.*?)(\.[^.]+)?$/); const oldStem = (m?.[1] || oldFull); const oldExt = (m?.[2] || ''); const newStem = await openRenameDialog(oldStem, oldExt); if (!newStem || newStem === oldStem) return; const name = newStem + oldExt; const dst = base + (base.includes('\\') ? '\\' : '/') + name; if (await exists(dst)) { alert('同名已存在'); return } await moveFileSafe(path, dst); if (currentFilePath === path) { currentFilePath = dst as any; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; try { const nodes = Array.from((document.getElementById('lib-tree')||document.body).querySelectorAll('.lib-node') as any) as HTMLElement[]; const node = nodes.find(n => (n as any).dataset?.path === dst); if (node) node.dispatchEvent(new MouseEvent('click', { bubbles: true })) } catch {} } catch (e) { showError('重命名失败', e) } }))
+    menu.appendChild(mkItem('删除', async () => { try { const ok = await confirmNative('确定删除？不可恢复'); if (!ok) return; await deleteFileSafe(path); if (currentFilePath === path) { await fileTree.newFileInSelected(); mode = 'edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('删除失败', e) } }))
     menu.style.left = Math.min(ev.clientX, (window.innerWidth - 180)) + 'px'
     menu.style.top = Math.min(ev.clientY, (window.innerHeight - 120)) + 'px'
     menu.style.display = 'block'
@@ -1719,8 +1802,10 @@ function bindEvents() {
     try {
       const lib = document.getElementById('library') as HTMLDivElement | null
       const libVisible = lib && !lib.classList.contains('hidden')
-      if (!libVisible || !selectedNodeEl) return
-      const p = (selectedNodeEl as any).dataset?.path as string || ''
+      if (!libVisible) return
+      const row = document.querySelector('#lib-tree .lib-node.selected') as HTMLElement | null
+      if (!row) return
+      const p = (row as any).dataset?.path as string || ''
       if (!p) return
       if (e.key === 'F2') {
         e.preventDefault()
@@ -1739,7 +1824,7 @@ function bindEvents() {
       }
       if (e.key === 'Delete') {
         e.preventDefault()
-        const ok = await ask('确定删除所选项？不可恢复')
+        const ok = await confirmNative('确定删除所选项？不可恢复')
         if (!ok) return
         await deleteFileSafe(p)
         if (currentFilePath === p) { await fileTree.newFileInSelected(); mode = 'edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {}; }

@@ -1,4 +1,5 @@
 import { readDir, stat, mkdir, rename, remove, exists, writeTextFile, writeFile, readFile, watchImmediate } from '@tauri-apps/plugin-fs'
+import appIconUrl from '../flymd.png?url'
 
 export type FileTreeOptions = {
   // 获取库根目录（未设置时返回 null）
@@ -163,12 +164,15 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
         } catch (err) { console.error(err) }
       })
     } else {
-      const ico = document.createElement('span')
-      ico.className = 'lib-ico lib-ico-file'
-      row.appendChild(ico); row.appendChild(label)
+      const img = document.createElement('img')
+      img.className = 'lib-ico lib-ico-app'
+      try { img.setAttribute('src', appIconUrl) } catch {}
+      row.appendChild(img); row.appendChild(label)
       try { const ext = (e.name.split('.').pop() || '').toLowerCase(); if (ext) row.classList.add('file-ext-' + ext) } catch {}
 
+      // 单击加载文档并保持选中
       row.addEventListener('click', async () => { saveSelection(e.path, false, row); try { await state.opts?.onOpenFile(e.path) } catch {} })
+      // 双击加载，兼容旧习惯
       row.addEventListener('dblclick', async () => { await state.opts?.onOpenFile(e.path) })
 
       row.setAttribute('draggable','true')
