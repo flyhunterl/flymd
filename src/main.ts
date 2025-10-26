@@ -16,7 +16,7 @@ import DOMPurify from 'dompurify'
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
-import { readTextFile, writeTextFile, readDir, stat, readFile } from '@tauri-apps/plugin-fs'
+import { readTextFile, writeTextFile, readDir, stat, readFile, mkdir } from '@tauri-apps/plugin-fs'
 import { Store } from '@tauri-apps/plugin-store'
 import { open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -1133,6 +1133,23 @@ async function setLibraryRoot(p: string) {
   } catch {}
 }
 
+// 粘贴图片默认保存目录（无打开文件时使用）
+async function getDefaultPasteDir(): Promise<string | null> {
+  try {
+    if (!store) return null
+    const val = await store.get('defaultPasteDir')
+    return (typeof val === 'string' && val) ? val : null
+  } catch { return null }
+}
+
+async function setDefaultPasteDir(p: string) {
+  try {
+    if (!store) return
+    await store.set('defaultPasteDir', p)
+    await store.save()
+  } catch {}
+}
+
 function showLibrary(show: boolean) {
   const lib = document.getElementById('library') as HTMLDivElement | null
   const container = document.querySelector('.container') as HTMLDivElement | null
@@ -1339,6 +1356,103 @@ function bindEvents() {
   })
   editor.addEventListener('keyup', refreshStatus)
   editor.addEventListener('click', refreshStatus)
+  // 粘贴图片到编辑器：保存到 assets/ 并插入相对路径
+  editor.addEventListener('paste', guard(async (e: ClipboardEvent) => {
+    try {
+      const dt = e.clipboardData
+      if (!dt) return
+      const items = Array.from(dt.items || [])
+      const imgItem = items.find((it) => it.kind === 'file' && /^image\//i.test(it.type))
+      if (!imgItem) return
+
+      const file = imgItem.getAsFile()
+      if (!file) return
+
+      e.preventDefault()
+
+      // 生成文件名
+      const mime = (file.type || '').toLowerCase()
+      const ext = (() => {
+        if (mime.includes('jpeg')) return 'jpg'
+        if (mime.includes('png')) return 'png'
+        if (mime.includes('gif')) return 'gif'
+        if (mime.includes('webp')) return 'webp'
+        if (mime.includes('bmp')) return 'bmp'
+        if (mime.includes('avif')) return 'avif'
+        if (mime.includes('svg')) return 'svg'
+        return 'png'
+      })()
+      const ts = new Date()
+      const pad = (n: number) => (n < 10 ? '0' + n : '' + n)
+      const rand = Math.random().toString(36).slice(2, 6)
+      const fname = `pasted-${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}-${rand}.${ext}`
+
+      // 目标目录：优先使用当前 Markdown 文件所在目录的 assets/
+      let targetDir: string | null = null
+      let mdRel: string | null = null
+      if (currentFilePath) {
+        const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
+        const sep = /[a-zA-Z]:\\/.test(base) || base.includes('\\') ? '\\' : '/'
+        targetDir = base.replace(/[\\/]+$/, '') + sep + 'assets'
+        mdRel = `assets/${fname}`
+      } else {
+        // 无打开文件：优先读取默认粘贴目录；未设置则询问一次并保存
+        let pref = await getDefaultPasteDir()
+        if (pref && typeof pref === 'string' && pref.trim()) {
+          targetDir = pref
+        } else {
+          try {
+            if (isTauriRuntime() && typeof open === 'function') {
+              const chosen = await open({ directory: true, multiple: false })
+              const sel = Array.isArray(chosen) ? chosen[0] : chosen
+              if (typeof sel === 'string' && sel) {
+                const p = normalizePath(sel)
+                if (p) {
+                  targetDir = p
+                  await setDefaultPasteDir(p)
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // 保存文件（Tauri 环境）
+      if (targetDir && isTauriRuntime()) {
+        try {
+          // 确保目录存在
+          try { await mkdir(targetDir, { recursive: true } as any) } catch {}
+          const sep = /[a-zA-Z]:\\/.test(targetDir) || targetDir.includes('\\') ? '\\' : '/'
+          const targetPath = targetDir.replace(/[\\/]+$/, '') + sep + fname
+          // 通过文件句柄写入，避免对 writeFile 额外权限要求
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          const fh = await openFileHandle(targetPath, { create: true, write: true, truncate: true } as any)
+          try { await fh.write(bytes) } finally { await fh.close() }
+
+          // 插入 Markdown（相对或绝对路径）
+          const toMdUrl = (p: string) => (/[\s()]/.test(p) ? `<${p}>` : p)
+          const insertPath = mdRel || targetPath
+          insertAtCursor(`![${fname}](${toMdUrl(insertPath)})`)
+          if (mode === 'preview') await renderPreview()
+          return
+        } catch (err) {
+          // 写文件失败则退回 data URL 嵌入
+          console.warn('保存粘贴图片失败，退回 data URL', err)
+        }
+      }
+
+      // 兜底：以 data URL 形式插入（不会改动磁盘）
+      try {
+        const dataUrl = await fileToDataUrl(file)
+        insertAtCursor(`![${fname}](${dataUrl})`)
+        if (mode === 'preview') await renderPreview()
+      } catch (e2) {
+        showError('粘贴图片失败', e2)
+      }
+    } catch (err) {
+      showError('处理粘贴图片失败', err)
+    }
+  }))
   // 拖拽到编辑器：插入图片（本地文件或 URL）
   editor.addEventListener('dragover', (e) => { e.preventDefault() })
   editor.addEventListener('drop', async (e) => {

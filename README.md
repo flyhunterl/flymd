@@ -6,6 +6,16 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
+
+
+## 更新 v0.1.23
+
+- 新增：库功能 在侧栏显示库里所有文档
+- 新增：剪切板图片直接粘贴
+- 修复: 本图片不能渲染的问题
+- 修复：连接无法跳转的问题
+
+
 ## 更新 v0.1.2
 
 本次版本聚焦稳定性与细节体验优化，主要改动：
@@ -162,8 +172,6 @@ flymd/
 - [x] Linux（桌面环境）
 
 ### 计划中
-- [ ] 多窗口：支持同时打开多个 flyMD 窗口，互不干扰；可通过系统“打开方式/双击文件”或应用菜单“在新窗口打开…”创建新窗口；每个窗口独立未保存确认与标题“*”标记
-- [ ] 文档目录侧栏：选择文件夹后，左侧列表框列出该目录下所有 Markdown 文档（.md/.markdown/.txt，默认递归）；支持搜索、刷新、排序（名称/修改时间）与排除规则，后续可选树形视图
 - [ ] Typecho 发布（XML-RPC）：一键发布/更新文章到 Typecho，支持草稿/发布、分类与标签
 - [ ] 图片直传（R2）：对接 Cloudflare R2（S3 兼容），支持拖拽/粘贴上传并自动替换为外链，提供鉴权配置与体积压缩
 
