@@ -845,9 +845,11 @@ async function openFile2(preset?: unknown) {
     dirty = false
     refreshTitle()
     refreshStatus()
-    if (mode === 'preview') {
+  if (mode === 'preview') {
       await renderPreview()
     }
+    // 打开后默认进入预览模式
+    await switchToPreviewAfterOpen()
     await pushRecent(currentFilePath)
     await renderRecentPanel(false)
     logInfo('文件打开成功', { path: selectedPath, size: content.length })
@@ -991,6 +993,24 @@ async function renderRecentPanel(toggle = true) {
     })
   })
   if (toggle) panel.classList.toggle('hidden')
+}
+
+// 同步预览/编辑按钮文案，避免编码问题
+function syncToggleButton() {
+  try {
+    const btn = document.getElementById('btn-toggle') as HTMLButtonElement | null
+    if (btn) btn.textContent = mode === 'edit' ? '\u9884\u89c8' : '\u7f16\u8f91'
+  } catch {}
+}
+
+// 打开文件后强制切换为预览模式
+async function switchToPreviewAfterOpen() {
+  try {
+    mode = 'preview'
+    await renderPreview()
+    preview.classList.remove('hidden')
+    syncToggleButton()
+  } catch {}
 }
 
 // 绑定事件
@@ -1215,6 +1235,8 @@ function bindEvents() {
                 refreshTitle()
                 refreshStatus()
                 if (mode === 'preview') await renderPreview()
+                // 拖入 MD 文件后默认预览
+                await switchToPreviewAfterOpen()
               }
             } catch (err) {
               showError('读取拖拽的MD文件失败', err)
