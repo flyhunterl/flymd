@@ -1379,6 +1379,34 @@ async function openUploaderDialog() {
   } catch {}
 
   showUploaderOverlay(true)
+  // 开关即时生效：切换启用时立即写入（仅在必填项齐全时生效）
+  try {
+    const applyImmediate = async () => {
+      try {
+        const cfg = {
+          enabled: !!inputEnabled.checked,
+          accessKeyId: inputAk.value.trim(),
+          secretAccessKey: inputSk.value.trim(),
+          bucket: inputBucket.value.trim(),
+          endpoint: inputEndpoint.value.trim() || undefined,
+          region: inputRegion.value.trim() || undefined,
+          customDomain: inputDomain.value.trim() || undefined,
+          keyTemplate: inputTpl.value.trim() || '{year}/{month}{fileName}{md5}.{extName}',
+          forcePathStyle: !!inputPathStyle.checked,
+          aclPublicRead: !!inputAcl.checked,
+        }
+        if (cfg.enabled) {
+          if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) {
+            alert('启用上传需要 AccessKeyId、SecretAccessKey、Bucket');
+            inputEnabled.checked = false
+            return
+          }
+        }
+        if (store) { await store.set('uploader', cfg); await store.save() }
+      } catch (e) { console.warn('即时应用图床开关失败', e) }
+    }
+    inputEnabled.addEventListener('change', () => { void applyImmediate() })
+  } catch {}
 
   const onCancel = () => { showUploaderOverlay(false) }
   const onSubmit = async (e: Event) => {
