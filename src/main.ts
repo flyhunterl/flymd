@@ -1528,7 +1528,7 @@ function bindEvents() {
   })
   editor.addEventListener('keyup', refreshStatus)
   editor.addEventListener('click', refreshStatus)
-  // 粘贴图片到编辑器：保存到 assets/ 并插入相对路径
+  // 粘贴图片到编辑器：占位符 + 异步上传，不阻塞编辑
   editor.addEventListener('paste', guard(async (e: ClipboardEvent) => {
     try {
       const dt = e.clipboardData
@@ -1559,6 +1559,9 @@ function bindEvents() {
       const rand = Math.random().toString(36).slice(2, 6)
       const fname = `pasted-${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}-${rand}.${ext}`
 
+      // 占位符 + 异步上传，不阻塞编辑
+      await startAsyncUploadFromFile(file, fname)
+      return
       // 若开启直连上传（S3/R2），优先尝试上传，成功则直接插入外链并返回
       try {
         const upCfg = await getUploaderConfig()
@@ -1572,68 +1575,7 @@ function bindEvents() {
         console.warn('直连上传失败，改用本地保存/内联', e)
       }
 
-      // 目标目录：优先使用当前 Markdown 文件所在目录的 assets/
-      let targetDir: string | null = null
-      let mdRel: string | null = null
-      if (currentFilePath) {
-        const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
-        const sep = /[a-zA-Z]:\\/.test(base) || base.includes('\\') ? '\\' : '/'
-        targetDir = base.replace(/[\\/]+$/, '') + sep + 'assets'
-        mdRel = `assets/${fname}`
-      } else {
-        // 无打开文件：优先读取默认粘贴目录；未设置则询问一次并保存
-        let pref = await getDefaultPasteDir()
-        if (pref && typeof pref === 'string' && pref.trim()) {
-          targetDir = pref
-        } else {
-          try {
-            if (isTauriRuntime() && typeof open === 'function') {
-              const chosen = await open({ directory: true, multiple: false })
-              const sel = Array.isArray(chosen) ? chosen[0] : chosen
-              if (typeof sel === 'string' && sel) {
-                const p = normalizePath(sel)
-                if (p) {
-                  targetDir = p
-                  await setDefaultPasteDir(p)
-                }
-              }
-            }
-          } catch {}
-        }
-      }
-
-      // 保存文件（Tauri 环境）
-      if (targetDir && isTauriRuntime()) {
-        try {
-          // 确保目录存在
-          try { await mkdir(targetDir, { recursive: true } as any) } catch {}
-          const sep = /[a-zA-Z]:\\/.test(targetDir) || targetDir.includes('\\') ? '\\' : '/'
-          const targetPath = targetDir.replace(/[\\/]+$/, '') + sep + fname
-          // 通过文件句柄写入，避免对 writeFile 额外权限要求
-          const bytes = new Uint8Array(await file.arrayBuffer())
-          const fh = await openFileHandle(targetPath, { create: true, write: true, truncate: true } as any)
-          try { await fh.write(bytes) } finally { await fh.close() }
-
-          // 插入 Markdown（相对或绝对路径）
-          const toMdUrl = (p: string) => (/[\s()]/.test(p) ? `<${p}>` : p)
-          const insertPath = mdRel || targetPath
-          insertAtCursor(`![${fname}](${toMdUrl(insertPath)})`)
-          if (mode === 'preview') await renderPreview()
-          return
-        } catch (err) {
-          // 写文件失败则退回 data URL 嵌入
-          console.warn('保存粘贴图片失败，退回 data URL', err)
-        }
-      }
-
-      // 兜底：以 data URL 形式插入（不会改动磁盘）
-      try {
-        const dataUrl = await fileToDataUrl(file)
-        insertAtCursor(`![${fname}](${dataUrl})`)
-        if (mode === 'preview') await renderPreview()
-      } catch (e2) {
-        showError('粘贴图片失败', e2)
-      }
+      await startAsyncUploadFromFile(file, fname)
     } catch (err) {
       showError('处理粘贴图片失败', err)
     }
@@ -1943,3 +1885,69 @@ function bindEvents() {
 
 
 
+
+// ========= 粘贴/拖拽异步上传占位支持 =========
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function replaceUploadingPlaceholder(id: string, replacementMarkdown: string) {
+  try {
+    const token = `uploading://${id}`
+    const re = new RegExp(`!\\[[^\\]]*\\]\\(${escapeRegExp(token)}\\)`) // 只替换第一个占位
+    const before = editor.value
+    if (re.test(before)) {
+      editor.value = before.replace(re, replacementMarkdown)
+      dirty = true
+      refreshTitle()
+      refreshStatus()
+      if (mode === 'preview') void renderPreview()
+    }
+  } catch {}
+}
+
+function genUploadId(): string {
+  return `upl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
+  const id = genUploadId()
+  insertAtCursor(`![${fname || 'image'}](uploading://${id})`)
+  void (async () => {
+    try {
+      const upCfg = await getUploaderConfig()
+      if (upCfg) {
+        const res = await uploadImageToS3R2(file, fname, file.type || 'application/octet-stream', upCfg)
+        replaceUploadingPlaceholder(id, `![${fname}](${res.publicUrl})`)
+        return
+      }
+    } catch {}
+    try {
+      const dataUrl = await fileToDataUrl(file)
+      replaceUploadingPlaceholder(id, `![${fname}](${dataUrl})`)
+    } catch {}
+  })()
+  return Promise.resolve()
+}
+
+function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Promise<void> {
+  const id = genUploadId()
+  insertAtCursor(`![${fname || 'image'}](uploading://${id})`)
+  void (async () => {
+    try {
+      const upCfg = await getUploaderConfig()
+      if (upCfg) {
+        const res = await uploadImageToS3R2(blob, fname, mime || 'application/octet-stream', upCfg)
+        replaceUploadingPlaceholder(id, `![${fname}](${res.publicUrl})`)
+        return
+      }
+    } catch {}
+    try {
+      const f = new File([blob], fname, { type: mime || 'application/octet-stream' })
+      const dataUrl = await fileToDataUrl(f)
+      replaceUploadingPlaceholder(id, `![${fname}](${dataUrl})`)
+    } catch {}
+  })()
+  return Promise.resolve()
+}
+// ========= END =========
