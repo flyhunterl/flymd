@@ -17,16 +17,20 @@
 - 文库功能：支持指定文件夹，树状目录显示文件夹下子文件夹及文档 并支持文档管理
 - 安全可靠：本地运行，无网络连接，预览 HTML 自动消毒 
 - 图床支持：支持S3/R2绑定，直接粘贴图片上传 上传成功后自行写好图片连接语法
+- 功能全面：MarkDown LaTeX Mermaid html全部支持
 
 
 ## 📸 界面预览
-<img width="962" height="672" alt="image" src="https://github.com/user-attachments/assets/917ad246-1208-4585-9e10-7d2da54f2eef" />
-<img width="960" height="640" alt="image" src="https://github.com/user-attachments/assets/97012b2d-4457-434d-a436-cdba796d25b4" />
-<img width="962" height="672" alt="image" src="https://github.com/user-attachments/assets/39343b06-3c54-4990-a198-e5f941da6578" />
-<img width="962" height="761" alt="image" src="https://github.com/user-attachments/assets/7f1e9179-6087-4abf-80d5-7965dbbf2600" />
-<img width="962" height="761" alt="image" src="https://github.com/user-attachments/assets/8d549446-6052-4c32-88f8-f473314476fd" />
-<img width="962" height="761" alt="image" src="https://github.com/user-attachments/assets/4283312d-5ff6-43a7-a537-ef503e48604e" />
-
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/917ad246-1208-4585-9e10-7d2da54f2eef" width="32%" alt="Markdown Editor Screenshot 1"/>
+  <img src="https://github.com/user-attachments/assets/97012b2d-4457-434d-a436-cdba796d25b4" width="32%" alt="Markdown Editor Screenshot 2"/>
+  <img src="https://github.com/user-attachments/assets/39343b06-3c54-4990-a198-e5f941da6578" width="32%" alt="Markdown Editor Screenshot 3"/>
+</p>
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/7f1e9179-6087-4abf-80d5-7965dbbf2600" width="32%" alt="Markdown Editor Screenshot 4"/>
+  <img src="https://github.com/user-attachments/assets/8d549446-6052-4c32-88f8-f47331447fd" width="32%" alt="Markdown Editor Screenshot 5"/>
+  <img src="https://github.com/user-attachments/assets/4283312d-5ff6-43a7-a537-ef503e48604e" width="32%" alt="Markdown Editor Screenshot 6"/>
+</p>
 
 ## 🎯 核心特性
 
