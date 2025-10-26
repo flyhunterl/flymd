@@ -135,11 +135,19 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
         if (now && kids.childElementCount === 0) await buildDir(root, e.path, kids)
       })
 
-      row.addEventListener('dragover', (ev) => { ev.preventDefault(); row.classList.add('selected') })
+      row.addEventListener('dragover', (ev) => {
+        ev.preventDefault()
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+        row.classList.add('selected')
+        console.log('[拖动] 拖动到文件夹:', e.path)
+      })
+      // 一些平台需要在 dragenter 同样 preventDefault，才能从“禁止”光标切到可放置
+      row.addEventListener('dragenter', (ev) => { try { ev.preventDefault(); if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'; row.classList.add('selected') } catch {} })
       row.addEventListener('dragleave', () => { row.classList.remove('selected') })
       row.addEventListener('drop', async (ev) => {
         try {
           ev.preventDefault(); row.classList.remove('selected')
+          console.log('[拖动] Drop事件触发，目标文件夹:', e.path)
           const src = ev.dataTransfer?.getData('text/plain') || ''
           if (!src) return
           const dst = join(e.path, nameOf(src))
@@ -161,7 +169,8 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
             await moveFileSafe(src, dst)
           }
           await api.refresh()
-        } catch (err) { console.error(err) }
+          console.log('[拖动] 移动完成:', src, '→', dst)
+        } catch (err) { console.error('[拖动] 移动失败:', err) }
       })
     } else {
       const img = document.createElement('img')
@@ -176,7 +185,13 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
       row.addEventListener('dblclick', async () => { await state.opts?.onOpenFile(e.path) })
 
       row.setAttribute('draggable','true')
-      row.addEventListener('dragstart', (ev) => { try { ev.dataTransfer?.setData('text/plain', e.path); if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move' } catch {} })
+      row.addEventListener('dragstart', (ev) => {
+        try {
+          console.log('[拖动] 开始拖动文件:', e.path)
+          ev.dataTransfer?.setData('text/plain', e.path)
+          if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move'
+        } catch {}
+      })
 
       parent.appendChild(row)
     }
@@ -207,6 +222,43 @@ async function renderRoot(root: string) {
     }
   } catch {}
 
+  // 根节点的拖放处理
+  topRow.addEventListener('dragover', (ev) => {
+    ev.preventDefault()
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+    topRow.classList.add('selected')
+    console.log('[拖动] 拖动到根文件夹:', root)
+  })
+  topRow.addEventListener('dragenter', (ev) => { try { ev.preventDefault(); if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'; topRow.classList.add('selected') } catch {} })
+  topRow.addEventListener('dragleave', () => { topRow.classList.remove('selected') })
+  topRow.addEventListener('drop', async (ev) => {
+    try {
+      ev.preventDefault(); topRow.classList.remove('selected')
+      const src = ev.dataTransfer?.getData('text/plain') || ''
+      if (!src) return
+      const dst = join(root, nameOf(src))
+      if (src === dst) return
+      if (!isInside(root, src) || !isInside(root, dst)) return alert('仅允许在库目录内移动')
+      if (await exists(dst)) {
+        const choice = await conflictModal('目标已存在', ['覆盖', '自动改名', '取消'], 1)
+        if (choice === 2) return
+        if (choice === 1) {
+          const nm = nameOf(src)
+          const stem = nm.replace(/(\.[^.]+)$/,''); const ext = nm.match(/(\.[^.]+)$/)?.[1] || ''
+          let i=1, cand=''
+          do { cand = `${stem} ${++i}${ext}` } while (await exists(join(root, cand)))
+          await moveFileSafe(src, join(root, cand))
+        } else {
+          await moveFileSafe(src, dst)
+        }
+      } else {
+        await moveFileSafe(src, dst)
+      }
+      await api.refresh()
+      console.log('[拖动] 移动完成:', src, '→', dst)
+    } catch (err) { console.error('[拖动] 移动失败:', err) }
+  })
+
   topRow.addEventListener('click', async () => {
     const was = state.expanded.has(root)
     const now = !was
@@ -225,6 +277,10 @@ async function refresh() {
 
 async function init(container: HTMLElement, opts: FileTreeOptions) {
   state.container = container; state.opts = opts
+  // 兜底：在整个文件树区域内允许 dragover，避免出现全局“禁止”光标
+  try {
+    container.addEventListener('dragover', (ev) => { ev.preventDefault() })
+  } catch {}
   await refresh()
   if (!state.watching) {
     try {

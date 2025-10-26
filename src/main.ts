@@ -1698,7 +1698,11 @@ async function newFileSafe(dir: string, name = '新建文档.md'): Promise<strin
       kids.className = 'lib-children'
       kids.style.display = 'none'
       container.appendChild(row)
-      row.addEventListener('dragover', (ev) => { ev.preventDefault(); row.classList.add('selected') })
+      row.addEventListener('dragover', (ev) => {
+        ev.preventDefault()
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+        row.classList.add('selected')
+      })
       row.addEventListener('dragleave', () => { row.classList.remove('selected') })
       row.addEventListener('drop', async (ev) => { try { ev.preventDefault(); row.classList.remove('selected'); const src = ev.dataTransfer?.getData('text/plain') || ''; if (!src) return; const base = e.path; const sep = base.includes('\\\\') ? '\\\\' : '/'; const dst = base + sep + (src.split(/[\\\\/]+/).pop() || ''); if (src === dst) return; const root = await getLibraryRoot(); if (!root || !isInside(root, src) || !isInside(root, dst)) { alert('仅允许在库目录内移动'); return } if (await exists(dst)) { const ok = await ask('目标已存在，是否覆盖？'); if (!ok) return } await moveFileSafe(src, dst); if (currentFilePath === src) { currentFilePath = dst as any; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('移动失败', e) } })
       container.appendChild(kids)
@@ -1805,6 +1809,32 @@ function bindEvents() {
     const onDoc = () => hide()
     menu.innerHTML = ''
     if (isDir) { menu.appendChild(mkItem('在此新建文档', async () => { try { const p2 = await newFileSafe(path); await openFile2(p2); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {}; const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; const n2 = Array.from((document.getElementById('lib-tree')||document.body).querySelectorAll('.lib-node.lib-dir') as any).find((n:any) => n.dataset?.path === path); if (n2) n2.dispatchEvent(new MouseEvent('click', { bubbles: true })) } catch (e) { showError('新建失败', e) } })) }
+    // 拖拽托底：右键“移动到…”以便选择目标目录
+    menu.appendChild(mkItem('移动到…', async () => {
+      try {
+        const root = await getLibraryRoot(); if (!root) { alert('请先选择库目录'); return }
+        if (!isInside(root, path)) { alert('仅允许移动库内文件/文件夹'); return }
+        if (typeof open !== 'function') { alert('该功能需要在 Tauri 应用中使用'); return }
+        const defaultDir = path.replace(/[\\/][^\\/]*$/, '')
+        const picked = await open({ directory: true, defaultPath: defaultDir || root }) as any
+        const dest = (typeof picked === 'string') ? picked : ((picked as any)?.path || '')
+        if (!dest) return
+        if (!isInside(root, dest)) { alert('仅允许移动到库目录内'); return }
+        const name = (path.split(/[\\/]+/).pop() || '')
+        const sep = dest.includes('\\') ? '\\' : '/'
+        const dst = dest.replace(/[\\/]+$/, '') + sep + name
+        if (dst === path) return
+        if (await exists(dst)) {
+          const ok = await ask('目标已存在，是否覆盖？')
+          if (!ok) return
+        }
+        await moveFileSafe(path, dst)
+        if (currentFilePath === path) { currentFilePath = dst as any; refreshTitle() }
+        const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null
+        if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true }
+        else if (treeEl) { await fileTree.refresh() }
+      } catch (e) { showError('移动失败', e) }
+    }))
     menu.appendChild(mkItem('重命名', async () => { try { const base = path.replace(/[\\/][^\\/]*$/, ''); const oldFull = path.split(/[\\/]+/).pop() || ''; const m = oldFull.match(/^(.*?)(\.[^.]+)?$/); const oldStem = (m?.[1] || oldFull); const oldExt = (m?.[2] || ''); const newStem = await openRenameDialog(oldStem, oldExt); if (!newStem || newStem === oldStem) return; const name = newStem + oldExt; const dst = base + (base.includes('\\') ? '\\' : '/') + name; if (await exists(dst)) { alert('同名已存在'); return } await moveFileSafe(path, dst); if (currentFilePath === path) { currentFilePath = dst as any; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; try { const nodes = Array.from((document.getElementById('lib-tree')||document.body).querySelectorAll('.lib-node') as any) as HTMLElement[]; const node = nodes.find(n => (n as any).dataset?.path === dst); if (node) node.dispatchEvent(new MouseEvent('click', { bubbles: true })) } catch {} } catch (e) { showError('重命名失败', e) } }))
     menu.appendChild(mkItem('删除', async () => { try { console.log('[删除] 右键菜单删除, 路径:', path); const ok = await confirmNative('确定删除？将移至回收站'); console.log('[删除] 用户确认结果:', ok); if (!ok) return; console.log('[删除] 开始删除文件'); await deleteFileSafe(path, false); console.log('[删除] 删除完成'); if (currentFilePath === path) { currentFilePath = null as any; if (editor) (editor as HTMLTextAreaElement).value = ''; if (preview) preview.innerHTML = ''; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('删除失败', e) } }))
     menu.style.left = Math.min(ev.clientX, (window.innerWidth - 180)) + 'px'
@@ -1845,6 +1875,11 @@ function bindEvents() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') { e.preventDefault(); await toggleMode(); return }
     if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); guard(formatBold)(); if (mode === 'preview') void renderPreview(); return }
     if (e.ctrlKey && e.key.toLowerCase() === 'i') { e.preventDefault(); guard(formatItalic)(); if (mode === 'preview') void renderPreview(); return }
+    // 文件操作快捷键
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); await openFile2(); return }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); await saveAs(); return }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); await saveFile(); return }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); await newFile(); return }
     try {
       const lib = document.getElementById('library') as HTMLDivElement | null
       const libVisible = lib && !lib.classList.contains('hidden')

@@ -15,6 +15,12 @@ const DEV_CSP = [
 
 export default defineConfig({
   base: './',
+  resolve: {
+    alias: {
+      // 将 Node 内置的 punycode 指向浏览器版 polyfill，修复 markdown-it 在浏览器端的链接规范化报错
+      punycode: 'punycode/'
+    }
+  },
   server: {
     port: 5173,
     strictPort: false
