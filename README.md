@@ -1,6 +1,6 @@
 # 飞速MarkDown【flyMD】
 
-> 一款多平台的极致简洁即开即用的 Markdown 文档编辑预览工具
+> 多平台 专注写作 极致简洁 即开即用
 
 [![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
@@ -10,7 +10,6 @@
 
 ## ✨ 项目定位
 
-flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目标是提供媲美 Windows 记事本的启动速度和操作流畅度，同时支持实时 Markdown 预览。
 
 设计理念：
 - 即开即用：冷启动直达编辑区，无启动画面/欢迎页 极速启动
@@ -63,14 +62,11 @@ flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目
 - 窗口状态持久化（尺寸、位置）
 - “最近”面板、“关于”弹窗（含快捷键说明）
 
-### 🛡️ 安全与稳定
-- 全局错误捕获与日志记录（INFO/WARN/ERROR/DEBUG）
-- 未处理 Promise 拒绝日志
+### 🛡️ 稳定兼容
 - 路径归一化与跨平台兼容
-- 日志优先写入 AppLog/AppLocalData，失败不影响应用
-- 浏览器兼容模式（可在浏览器中测试 UI），Tauri API 优雅降级
 
-### ⚡ 性能
+
+### ⚡ 极致性能
 - 高亮库按需加载，首次启动更快
 - Markdown 渲染器延迟初始化
 - 纯 TypeScript（无前端框架）
@@ -81,8 +77,9 @@ flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目
 ### 环境要求
 
 - Windows 10/11 (x64)
+- Linux
 - WebView2 Runtime（Windows 10/11 通常已预装）
-- 开发（可选）：Rust 1.70+、Node.js 18+、pnpm 或 npm
+
 
 ### 安装使用（推荐）
 
@@ -104,24 +101,7 @@ flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目
 | `Ctrl+I` | 斜体 |
 | `Ctrl+K` | 插入链接 |
 
-## 目录结构
 
-```
-flymd/
-├── src/                     # 前端源码
-│   ├── main.ts             # 编辑、预览、文件/拖拽/对话框
-│   ├── style.css           # 全局样式
-│   └── index.html          # HTML 入口
-├── src-tauri/              # Tauri 后端（v2）
-│   ├── src/
-│   │   └── main.rs         # Rust 主进程（dialog/fs/store/window-state/single-instance）
-│   ├── tauri.conf.json     # Tauri 配置（含 dialog:allow-ask 权限）
-│   ├── Cargo.toml
-│   └── build.rs
-├── package.json            # 依赖与脚本
-├── vite.config.ts          # Vite 配置
-└── README.md               # 项目说明
-```
 
 ## 📊 性能指标（目标）
 
@@ -166,7 +146,6 @@ flymd/
 
 ### 计划中
 - [ ] Typecho 发布（XML-RPC）：一键发布/更新文章到 Typecho，支持草稿/发布、分类与标签
-- [ ] 图片直传（R2）：对接 Cloudflare R2（S3 兼容），支持拖拽/粘贴上传并自动替换为外链，提供鉴权配置与体积压缩
 
 ## 🤝 贡献指南
 
