@@ -37,6 +37,7 @@
             "core:default",
             "core:window:allow-close",
             "core:window:allow-destroy",
+            "http:default",
             "dialog:default",
             "dialog:allow-ask",
             "dialog:allow-open",

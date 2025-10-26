@@ -23,6 +23,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import pkg from '../package.json'
+import { uploadImageToS3R2, type UploaderConfig } from './uploader/s3'
 // 应用版本号（用于窗口标题/关于弹窗）
 const APP_VERSION: string = (pkg as any)?.version ?? '0.0.0'
 
@@ -269,6 +270,12 @@ if (menubar) {
   recentBtn.title = '最近文件'
   recentBtn.textContent = '最近'
   menubar.appendChild(recentBtn)
+  const uplBtn = document.createElement('div')
+  uplBtn.id = 'btn-uploader'
+  uplBtn.className = 'menu-item'
+  uplBtn.title = '图床设置'
+  uplBtn.textContent = '图床'
+  menubar.appendChild(uplBtn)
   const libBtn = document.createElement('div')
   libBtn.id = 'btn-library'
   libBtn.className = 'menu-item'
@@ -383,7 +390,7 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
     const link = document.createElement('div')
     link.id = 'link-overlay'
     link.className = 'link-overlay hidden'
-    link.innerHTML = `
+  link.innerHTML = `
       <div class="link-dialog" role="dialog" aria-modal="true" aria-labelledby="link-title">
         <div class="link-header">
           <div id="link-title">插入链接</div>
@@ -403,9 +410,60 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
             <button type="submit" id="link-ok">插入</button>
           </div>
         </form>
+    </div>
+  `
+  containerEl.appendChild(link)
+
+  // 图床设置对话框
+  const upl = document.createElement('div')
+  upl.id = 'uploader-overlay'
+  upl.className = 'upl-overlay hidden'
+  upl.innerHTML = `
+    <div class="upl-dialog" role="dialog" aria-modal="true" aria-labelledby="upl-title">
+      <div class="upl-header">
+        <div id="upl-title">图床设置（S3 / R2）</div>
+        <button id="upl-close" class="about-close" title="关闭">×</button>
       </div>
-    `
-    containerEl.appendChild(link)
+      <form class="upl-body" id="upl-form">
+        <div class="upl-grid">
+          <label for="upl-enabled">启用</label>
+          <div class="upl-field"><input id="upl-enabled" type="checkbox" /></div>
+
+          <label for="upl-ak">AccessKeyId</label>
+          <div class="upl-field"><input id="upl-ak" type="text" placeholder="必填" /></div>
+
+          <label for="upl-sk">SecretAccessKey</label>
+          <div class="upl-field"><input id="upl-sk" type="password" placeholder="必填" /></div>
+
+          <label for="upl-bucket">Bucket</label>
+          <div class="upl-field"><input id="upl-bucket" type="text" placeholder="必填" /></div>
+
+          <label for="upl-endpoint">自定义节点地址</label>
+          <div class="upl-field"><input id="upl-endpoint" type="url" placeholder="例如 https://xxx.r2.cloudflarestorage.com" /></div>
+
+          <label for="upl-region">Region（可选）</label>
+          <div class="upl-field"><input id="upl-region" type="text" placeholder="R2 填 auto；S3 如 ap-southeast-1" /></div>
+
+          <label for="upl-domain">自定义域名</label>
+          <div class="upl-field"><input id="upl-domain" type="url" placeholder="例如 https://img.example.com" /></div>
+
+          <label for="upl-template">上传路径模板</label>
+          <div class="upl-field"><input id="upl-template" type="text" placeholder="{year}/{month}{fileName}{md5}.{extName}" /></div>
+
+          <label for="upl-pathstyle">Path-Style（R2 建议）</label>
+          <div class="upl-field"><input id="upl-pathstyle" type="checkbox" /></div>
+
+          <label for="upl-acl">public-read</label>
+          <div class="upl-field"><input id="upl-acl" type="checkbox" checked /></div>
+        </div>
+        <div class="upl-actions">
+          <button type="button" id="upl-cancel">取消</button>
+          <button type="submit" id="upl-save">保存</button>
+        </div>
+      </form>
+    </div>
+  `
+  containerEl.appendChild(upl)
   }
 
 // 打开“插入链接”对话框的 Promise 控制器
@@ -1150,6 +1208,118 @@ async function setDefaultPasteDir(p: string) {
   } catch {}
 }
 
+// 读取直连 S3/R2 上传配置（最小实现）
+async function getUploaderConfig(): Promise<UploaderConfig | null> {
+  try {
+    if (!store) return null
+    const up = await store.get('uploader')
+    if (!up || typeof up !== 'object') return null
+    const o = up as any
+    const cfg: UploaderConfig = {
+      enabled: !!o.enabled,
+      accessKeyId: String(o.accessKeyId || ''),
+      secretAccessKey: String(o.secretAccessKey || ''),
+      bucket: String(o.bucket || ''),
+      region: typeof o.region === 'string' ? o.region : undefined,
+      endpoint: typeof o.endpoint === 'string' ? o.endpoint : undefined,
+      customDomain: typeof o.customDomain === 'string' ? o.customDomain : undefined,
+      keyTemplate: typeof o.keyTemplate === 'string' ? o.keyTemplate : '{year}/{month}{fileName}{md5}.{extName}',
+      aclPublicRead: o.aclPublicRead !== false,
+      forcePathStyle: o.forcePathStyle !== false,
+    }
+    if (!cfg.enabled) return null
+    if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) return null
+    return cfg
+  } catch { return null }
+}
+
+function showUploaderOverlay(show: boolean) {
+  const overlay = document.getElementById('uploader-overlay') as HTMLDivElement | null
+  if (!overlay) return
+  if (show) overlay.classList.remove('hidden')
+  else overlay.classList.add('hidden')
+}
+
+async function openUploaderDialog() {
+  const overlay = document.getElementById('uploader-overlay') as HTMLDivElement | null
+  const form = overlay?.querySelector('#upl-form') as HTMLFormElement | null
+  if (!overlay || !form) return
+
+  const inputEnabled = overlay.querySelector('#upl-enabled') as HTMLInputElement
+  const inputAk = overlay.querySelector('#upl-ak') as HTMLInputElement
+  const inputSk = overlay.querySelector('#upl-sk') as HTMLInputElement
+  const inputBucket = overlay.querySelector('#upl-bucket') as HTMLInputElement
+  const inputEndpoint = overlay.querySelector('#upl-endpoint') as HTMLInputElement
+  const inputRegion = overlay.querySelector('#upl-region') as HTMLInputElement
+  const inputDomain = overlay.querySelector('#upl-domain') as HTMLInputElement
+  const inputTpl = overlay.querySelector('#upl-template') as HTMLInputElement
+  const inputPathStyle = overlay.querySelector('#upl-pathstyle') as HTMLInputElement
+  const inputAcl = overlay.querySelector('#upl-acl') as HTMLInputElement
+  const btnCancel = overlay.querySelector('#upl-cancel') as HTMLButtonElement
+  const btnClose = overlay.querySelector('#upl-close') as HTMLButtonElement
+
+  // 预填
+  try {
+    if (store) {
+      const up = (await store.get('uploader')) as any
+      inputEnabled.checked = !!up?.enabled
+      inputAk.value = up?.accessKeyId || ''
+      inputSk.value = up?.secretAccessKey || ''
+      inputBucket.value = up?.bucket || ''
+      inputEndpoint.value = up?.endpoint || ''
+      inputRegion.value = up?.region || ''
+      inputDomain.value = up?.customDomain || ''
+      inputTpl.value = up?.keyTemplate || '{year}/{month}{fileName}{md5}.{extName}'
+      inputPathStyle.checked = up?.forcePathStyle !== false
+      inputAcl.checked = up?.aclPublicRead !== false
+    }
+  } catch {}
+
+  showUploaderOverlay(true)
+
+  const onCancel = () => { showUploaderOverlay(false) }
+  const onSubmit = async (e: Event) => {
+    e.preventDefault()
+    try {
+      const cfg = {
+        enabled: !!inputEnabled.checked,
+        accessKeyId: inputAk.value.trim(),
+        secretAccessKey: inputSk.value.trim(),
+        bucket: inputBucket.value.trim(),
+        endpoint: inputEndpoint.value.trim() || undefined,
+        region: inputRegion.value.trim() || undefined,
+        customDomain: inputDomain.value.trim() || undefined,
+        keyTemplate: inputTpl.value.trim() || '{year}/{month}{fileName}{md5}.{extName}',
+        forcePathStyle: !!inputPathStyle.checked,
+        aclPublicRead: !!inputAcl.checked,
+      }
+      if (cfg.enabled) {
+        if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) {
+          alert('启用直传时 AccessKeyId、SecretAccessKey、Bucket 为必填');
+          return
+        }
+      }
+      if (store) {
+        await store.set('uploader', cfg)
+        await store.save()
+      }
+      showUploaderOverlay(false)
+    } catch (err) {
+      showError('保存图床设置失败', err)
+    } finally {
+      form?.removeEventListener('submit', onSubmit)
+      btnCancel?.removeEventListener('click', onCancel)
+      btnClose?.removeEventListener('click', onCancel)
+      overlay?.removeEventListener('click', onOverlayClick)
+    }
+  }
+  const onOverlayClick = (e: MouseEvent) => { if (e.target === overlay) onCancel() }
+  form.addEventListener('submit', onSubmit)
+  btnCancel.addEventListener('click', onCancel)
+  btnClose.addEventListener('click', onCancel)
+  overlay.addEventListener('click', onOverlayClick)
+}
+
 function showLibrary(show: boolean) {
   const lib = document.getElementById('library') as HTMLDivElement | null
   const container = document.querySelector('.container') as HTMLDivElement | null
@@ -1330,6 +1500,7 @@ function bindEvents() {
   const btnRecent = document.getElementById('btn-recent')
   const btnLibrary = document.getElementById('btn-library')
   const btnAbout = document.getElementById('btn-about')
+  const btnUploader = document.getElementById('btn-uploader')
 
   if (btnOpen) btnOpen.addEventListener('click', guard(() => openFile2()))
   if (btnSave) btnSave.addEventListener('click', guard(() => saveFile()))
@@ -1348,6 +1519,7 @@ function bindEvents() {
     await renderLibraryRoot()
   }))
   if (btnAbout) btnAbout.addEventListener('click', guard(() => showAbout(true)))
+  if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
 
   // 文本变化
   editor.addEventListener('input', () => {
@@ -1386,6 +1558,19 @@ function bindEvents() {
       const pad = (n: number) => (n < 10 ? '0' + n : '' + n)
       const rand = Math.random().toString(36).slice(2, 6)
       const fname = `pasted-${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}-${rand}.${ext}`
+
+      // 若开启直连上传（S3/R2），优先尝试上传，成功则直接插入外链并返回
+      try {
+        const upCfg = await getUploaderConfig()
+        if (upCfg) {
+          const pub = await uploadImageToS3R2(file, fname, file.type || 'application/octet-stream', upCfg)
+          insertAtCursor(`![${fname}](${pub.publicUrl})`)
+          if (mode === 'preview') await renderPreview()
+          return
+        }
+      } catch (e) {
+        console.warn('直连上传失败，改用本地保存/内联', e)
+      }
 
       // 目标目录：优先使用当前 Markdown 文件所在目录的 assets/
       let targetDir: string | null = null
@@ -1495,6 +1680,28 @@ function bindEvents() {
           reader.readAsText(mdFile, 'UTF-8')
           return
         }
+        // 若启用直连上传，优先尝试上传到 S3/R2，成功则直接插入外链后返回
+        try {
+          const upCfg = await getUploaderConfig()
+          if (upCfg) {
+            const partsUpload: string[] = []
+            for (const f of files) {
+              if (extIsImage(f.name) || (f.type && f.type.startsWith('image/'))) {
+                try {
+                  const pub = await uploadImageToS3R2(f, f.name, f.type || 'application/octet-stream', upCfg)
+                  partsUpload.push(`![${f.name}](${pub.publicUrl})`)
+                } catch (e) {
+                  console.warn('直连上传失败，跳过此文件使用本地兜底', f.name, e)
+                }
+              }
+            }
+            if (partsUpload.length > 0) {
+              insertAtCursor(partsUpload.join('\n'))
+              if (mode === 'preview') await renderPreview()
+              return
+            }
+          }
+        } catch {}
         // 处理图片
         const parts: string[] = []
         for (const f of files) {
@@ -1622,6 +1829,42 @@ function bindEvents() {
             if (md) { void openFile2(md); return }
             const imgs = paths.filter((p) => /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i.test(p))
             if (imgs.length > 0) {
+              // 若启用直连上传，优先尝试上传到 S3/R2
+              try {
+                const upCfg = await getUploaderConfig()
+                if (upCfg) {
+                  const toLabel = (p: string) => { const segs = p.split(/[\\/]+/); return segs[segs.length - 1] || 'image' }
+                  const parts: string[] = []
+                  for (const p of imgs) {
+                    try {
+                      const name = toLabel(p)
+                      const mime = (() => {
+                        const m = name.toLowerCase().match(/\.([a-z0-9]+)$/); const ext = m ? m[1] : ''
+                        if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+                        if (ext === 'png') return 'image/png'
+                        if (ext === 'gif') return 'image/gif'
+                        if (ext === 'webp') return 'image/webp'
+                        if (ext === 'bmp') return 'image/bmp'
+                        if (ext === 'avif') return 'image/avif'
+                        if (ext === 'svg') return 'image/svg+xml'
+                        if (ext === 'ico') return 'image/x-icon'
+                        return 'application/octet-stream'
+                      })()
+                      const bytes = await readFile(p as any)
+                      const blob = new Blob([bytes], { type: mime })
+                      const pub = await uploadImageToS3R2(blob, name, mime, upCfg)
+                      parts.push(`![${name}](${pub.publicUrl})`)
+                    } catch (e) {
+                      console.warn('单张图片上传失败，跳过：', p, e)
+                      const needAngle = /[\s()]/.test(p) || /^[a-zA-Z]:/.test(p) || /\\/.test(p)
+                      parts.push(`![${toLabel(p)}](${needAngle ? `<${p}>` : p})`)
+                    }
+                  }
+                  insertAtCursor(parts.join('\n'))
+                  if (mode === 'preview') await renderPreview()
+                  return
+                }
+              } catch (e) { console.warn('直连上传失败或未配置，回退为本地路径', e) }
               const toLabel = (p: string) => { const segs = p.split(/[\\/]+/); return segs[segs.length - 1] || 'image' }
               // 直接插入原始本地路径；预览阶段会自动转换为 asset: 以便显示
               const toMdUrl = (p: string) => {

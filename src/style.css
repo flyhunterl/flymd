@@ -203,3 +203,18 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 .link-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 .link-actions button { -webkit-app-region: no-drag; cursor: pointer; border: 1px solid var(--border); background: rgba(127,127,127,0.08); color: var(--fg); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
 .link-actions button:hover { background: rgba(127,127,127,0.14); }
+
+/* 图床设置 对话框 */
+.upl-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; z-index: 65; }
+.upl-overlay.hidden { display: none; }
+.upl-dialog { width: 520px; max-width: calc(100% - 40px); background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.2); }
+.upl-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; }
+.upl-body { padding: 14px 16px 16px 16px; max-height: 65vh; overflow: auto; }
+.upl-grid { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 10px; }
+.upl-field { display: contents; }
+.upl-grid label { color: var(--muted); font-size: 12px; }
+.upl-grid input[type="text"], .upl-grid input[type="password"], .upl-grid input[type="url"] { width: 100%; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 8px; outline: none; font-size: 13px; min-width: 0; box-sizing: border-box; }
+.upl-grid input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+.upl-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+.upl-actions button { -webkit-app-region: no-drag; cursor: pointer; border: 1px solid var(--border); background: rgba(127,127,127,0.08); color: var(--fg); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
+.upl-actions button:hover { background: rgba(127,127,127,0.14); }

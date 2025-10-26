@@ -127,6 +127,7 @@ jobs:
         with:
           files: |
             flymd-Windows-x64/**/*
+            flymd-Windows-x64-portable/**/*
             flymd-Linux-x64/**/*
           draft: true
           generate_release_notes: true
