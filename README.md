@@ -2,13 +2,13 @@
 
 > 一款多平台的极致简洁即开即用的 Markdown 文档编辑预览工具
 
-[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
 
 
-## 更新 v0.1.23
+## 更新 v0.1.3
 
 - 新增：库功能 在侧栏显示库里所有文档
 - 新增：剪切板图片直接粘贴
@@ -54,7 +54,7 @@ flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目
 
 *界面风格类似 Windows 记事本，采用纯文本菜单栏设计*
 
-## 🎯 核心特性（v0.1.2）
+## 🎯 核心特性（v0.1.3）
 
 ### 📝 编辑
 - 原生 `<textarea>` 编辑器，零延迟输入响应
@@ -113,7 +113,7 @@ flyMD 是一款追求**极致速度与简洁体验**的 Markdown 编辑器，目
 ### 安装使用（推荐）
 
 1. 前往 [Releases](https://github.com/flyhunterl/flymd/releases) 下载最新版本
-2. 运行 `flymd_0.1.2_x64_setup.exe` 安装（文件名以实际发布为准）
+2. 运行 `flymd_0.1.3_x64_setup.exe` 安装（文件名以实际发布为准）
 3. 启动 flyMD，开始使用
 
 ## ⌨️ 快捷键
@@ -158,7 +158,7 @@ flymd/
 
 ## 🗺️ 路线图
 
-### v0.1.2（当前） ✅
+### v0.1.3（当前） ✅
 - [x] 基础编辑与预览
 - [x] 文件打开/保存/另存为
 - [x] 快捷键支持
