@@ -24,6 +24,8 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import pkg from '../package.json'
 import { uploadImageToS3R2, type UploaderConfig } from './uploader/s3'
+import appIconUrl from '../flymd.png?url'
+import { decorateCodeBlocks } from './decorate'
 // 应用版本号（用于窗口标题/关于弹窗）
 const APP_VERSION: string = (pkg as any)?.version ?? '0.0.0'
 
@@ -268,13 +270,13 @@ if (menubar) {
   recentBtn.id = 'btn-recent'
   recentBtn.className = 'menu-item'
   recentBtn.title = '最近文件'
-  recentBtn.textContent = '最近'
+  recentBtn.textContent = '\u6700\u8fd1'
   menubar.appendChild(recentBtn)
   const uplBtn = document.createElement('div')
   uplBtn.id = 'btn-uploader'
   uplBtn.className = 'menu-item'
   uplBtn.title = '图床设置'
-  uplBtn.textContent = '图床'
+  uplBtn.textContent = '\u56fe\u5e8a'
   menubar.appendChild(uplBtn)
   const libBtn = document.createElement('div')
   libBtn.id = 'btn-library'
@@ -292,7 +294,7 @@ if (menubar) {
   aboutBtn.id = 'btn-about'
   aboutBtn.className = 'menu-item'
   aboutBtn.title = '关于'
-  aboutBtn.textContent = '关于'
+  aboutBtn.textContent = '\u5173\u4e8e'
   menubar.appendChild(aboutBtn)
 }
 const containerEl = document.querySelector('.container') as HTMLDivElement
@@ -330,7 +332,7 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
         about.innerHTML = `
           <div class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
             <div class="about-header">
-              <div id="about-title">关于 飞速MarkDown (flyMD) v${APP_VERSION}</div>
+              <div id="about-title">关于  v${APP_VERSION}</div>
               <button id="about-close" class="about-close" title="关闭">×</button>
             </div>
             <div class="about-body">
@@ -676,6 +678,7 @@ async function renderPreview() {
   console.log('DOMPurify 清理后的 HTML 片段:', safe.substring(0, 500))
   // 包裹一层容器，用于样式定宽居中显示
   preview.innerHTML = `<div class="preview-body">${safe}</div>`
+  try { decorateCodeBlocks(preview) } catch {}
   // 外链安全属性
   preview.querySelectorAll('a[href]').forEach((a) => {
     const el = a as HTMLAnchorElement
@@ -836,6 +839,7 @@ async function renderPreview() {
         mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
         mermaidReady = true
         console.log('Mermaid 已初始化')
+  try { decorateCodeBlocks(preview) } catch {}
       }
       for (let i = 0; i < nodes.length; i++) {
         const el = nodes[i]
@@ -867,6 +871,37 @@ async function renderPreview() {
     }
   } catch (e) {
     console.error('Mermaid 渲染失败：', e)
+  // 代码块装饰：语言角标、行号与复制按钮
+  try {
+    const codes = Array.from(preview.querySelectorAll('pre > code.hljs')) as HTMLElement[]
+    for (const code of codes) {
+      const pre = code.parentElement as HTMLElement | null
+      if (!pre || pre.getAttribute('data-codebox') === '1') continue
+      // 跳过 mermaid（已在前面转换成 div.mermaid）
+      if (code.classList.contains('language-mermaid')) continue
+      const lang = ((Array.from(code.classList).find(c => c.startsWith('language-')) || '').slice(9) || 'text').toUpperCase()
+      // 包装行以生成行号
+      try {
+        const html = code.innerHTML
+        const parts = html.split('\n')
+        code.innerHTML = parts.map(p => `<span class="cb-ln">${p || '&nbsp;'}</span>`).join('\n')
+      } catch {}
+      const box = document.createElement('div')
+      box.className = 'codebox'
+      const badge = document.createElement('div')
+      badge.className = 'code-lang'
+      badge.textContent = lang
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'code-copy'
+      btn.textContent = '复制'
+      if (pre.parentElement) pre.parentElement.insertBefore(box, pre)
+      box.appendChild(pre)
+      box.appendChild(badge)
+      box.appendChild(btn)
+      pre.setAttribute('data-codebox', '1')
+    }
+  } catch {}
   }
 }
 
@@ -1529,8 +1564,9 @@ async function renderDir(container: HTMLDivElement, dir: string) {
       })
     } else {
       const row = document.createElement('div')
-      row.className = 'lib-node lib-file'
-      row.innerHTML = `<svg class="lib-ico lib-ico-file" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5"/></svg><span class="lib-name">${e.name}</span>`
+      const ext = (e.name.split('.').pop() || '').toLowerCase()
+      row.className = 'lib-node lib-file file-ext-' + ext
+      row.innerHTML = `<img class="lib-ico lib-ico-app" src="${appIconUrl}" alt=""/><span class="lib-name">${e.name}</span>`
       row.title = e.path
       row.addEventListener('click', async () => {
         await openFile2(e.path)
@@ -1573,6 +1609,31 @@ function bindEvents() {
   if (btnSave) btnSave.addEventListener('click', guard(() => saveFile()))
   if (btnSaveas) btnSaveas.addEventListener('click', guard(() => saveAs()))
   if (btnToggle) btnToggle.addEventListener('click', guard(() => toggleMode()))
+  // 代码复制按钮（事件委托）
+  document.addEventListener('click', async (ev) => {
+    const t = ev?.target as HTMLElement
+    if (t && t.classList.contains('code-copy')) {
+      ev.preventDefault()
+      const box = t.closest('.codebox') as HTMLElement | null
+      const pre = box?.querySelector('pre') as HTMLElement | null
+      const text = pre ? (pre.textContent || '') : ''
+      let ok = false
+      try { await navigator.clipboard.writeText(text); ok = true } catch {}
+      if (!ok) {
+        try {
+          const ta = document.createElement('textarea')
+          ta.value = text
+          document.body.appendChild(ta)
+          ta.select()
+          document.execCommand('copy')
+          document.body.removeChild(ta)
+          ok = true
+        } catch {}
+      }
+      t.textContent = ok ? '已复制' : '复制失败'
+      setTimeout(() => { (t as HTMLButtonElement).textContent = '复制' }, 1200)
+    }
+  }, { capture: true })
   if (btnNew) btnNew.addEventListener('click', guard(() => newFile()))
   if (btnRecent) btnRecent.addEventListener('click', guard(() => renderRecentPanel(true)))
   if (btnLibrary) btnLibrary.addEventListener('click', guard(async () => {
@@ -2037,3 +2098,6 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   return Promise.resolve()
 }
 // ========= END =========
+
+
+

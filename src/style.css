@@ -10,7 +10,7 @@
   --muted: #7a7a7a;
   --border: #e5e7eb;
   /* 侧栏/面板浅灰背景（亮色下略浅，暗色下略深） */
-  --panel-bg: #f7f8fa;
+  --panel-bg: #f3f4f6;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,7 +19,7 @@
     --fg: #e5e7eb;
     --muted: #9ca3af;
     --border: #1f2937;
-    --panel-bg: #0f1114;
+    --panel-bg: #0e1217;
   }
 }
 
@@ -259,3 +259,78 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 #upl-test-result { margin-left: auto; font-size: 12px; color: var(--muted); }
 #upl-test-result.ok { color: #16a34a; }
 #upl-test-result.err { color: #dc2626; }
+
+/* === 全局滚动控制：去掉窗口级滚动，仅内部滚动 === */
+html, body { overflow: hidden; }
+
+/* === Markdown 代码渲染主题（简约）=== */
+:root {
+  --code-bg: #f6f8fa;
+  --code-border: #e5e7eb;
+  --code-fg: #1f2328;
+  --code-muted: #667085;
+  --c-key: #7c3aed;   /* 关键字 */
+  --c-str: #2563eb;   /* 字符串 */
+  --c-num: #059669;   /* 数字 */
+  --c-fn:  #db2777;   /* 函数/标题 */
+  --c-com: #9ca3af;  /* 注释 */
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --code-bg: #0f1114;
+    --code-border: #1f2937;
+    --code-fg: #e5e7eb;
+    --code-muted: #9ca3af;
+    --c-key: #a78bfa;
+    --c-str: #60a5fa;
+    --c-num: #34d399;
+    --c-fn:  #f472b6;
+    --c-com: #6b7280;
+  }
+}
+
+/* 块级代码 */
+.preview pre { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 10px; padding: 12px 14px; overflow: auto; -webkit-overflow-scrolling: touch; margin: 12px 0; }
+.preview pre code { background: transparent; color: var(--code-fg); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 13px; line-height: 1.65; }
+/* 行内代码 */
+.preview :not(pre) > code { background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--code-border); border-radius: 6px; padding: 0 6px; font-size: 0.9em; }
+
+/* hljs token 颜色（不依赖外部主题）*/
+.preview code.hljs .hljs-keyword, .preview code.hljs .hljs-selector-tag { color: var(--c-key); }
+.preview code.hljs .hljs-title, .preview code.hljs .hljs-section, .preview code.hljs .hljs-function { color: var(--c-fn); }
+.preview code.hljs .hljs-string, .preview code.hljs .hljs-attr, .preview code.hljs .hljs-template-variable { color: var(--c-str); }
+.preview code.hljs .hljs-number, .preview code.hljs .hljs-literal, .preview code.hljs .hljs-bullet { color: var(--c-num); }
+.preview code.hljs .hljs-comment, .preview code.hljs .hljs-quote { color: var(--c-com); font-style: italic; }
+
+/* 代码滚动条可以保留以保证可用性；如需隐藏，可启用下两行 */
+/* .preview pre::-webkit-scrollbar { height: 8px; } */
+/* .preview pre::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.35); border-radius: 999px; } */
+
+/* === 代码块装饰（语言角标、行号、复制）=== */
+.codebox { position: relative; }
+.codebox .code-lang { position: absolute; top: 6px; left: 8px; padding: 2px 6px; border: 1px solid var(--code-border); border-radius: 999px; background: var(--bg); color: var(--muted); font-size: 12px; line-height: 1; }
+.codebox .code-copy { position: absolute; top: 6px; right: 8px; padding: 2px 8px; border: 1px solid var(--code-border); border-radius: 999px; background: rgba(127,127,127,0.08); color: var(--fg); font-size: 12px; cursor: pointer; }
+.codebox .code-copy:hover { background: rgba(127,127,127,0.14); }
+.codebox pre { margin-top: 8px; counter-reset: ln; }
+.codebox .cb-ln { display: block; position: relative; padding-left: 2.8em; }
+.codebox .cb-ln::before { content: counter(ln); counter-increment: ln; position: absolute; left: 0; width: 2.2em; text-align: right; color: var(--muted); }
+
+/* === 侧栏文档图标色（按扩展名）=== */
+.library .lib-node.file-ext-md .lib-ico-file,
+.library .lib-node.file-ext-markdown .lib-ico-file { color: #22c55e; }
+.library .lib-node.file-ext-txt .lib-ico-file { color: #64748b; }
+.library .lib-node.file-ext-json .lib-ico-file { color: #f59e0b; }
+.library .lib-node.file-ext-yml .lib-ico-file,
+.library .lib-node.file-ext-yaml .lib-ico-file { color: #38bdf8; }
+.library .lib-node.file-ext-js .lib-ico-file { color: #eab308; }
+.library .lib-node.file-ext-ts .lib-ico-file { color: #3b82f6; }
+.library .lib-node.file-ext-svg .lib-ico-file { color: #8b5cf6; }
+.library .lib-node.file-ext-png .lib-ico-file,
+.library .lib-node.file-ext-jpg .lib-ico-file,
+.library .lib-node.file-ext-jpeg .lib-ico-file,
+.library .lib-node.file-ext-gif .lib-ico-file { color: #ec4899; }
+
+
+/* 程序图标作为文件夹图标 */
+.library .lib-ico-app { width: 16px; height: 16px; border-radius: 3px; object-fit: cover; }
+
