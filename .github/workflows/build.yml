@@ -41,6 +41,13 @@ jobs:
           choco install nsis -y
           choco install wixtoolset -y
 
+      - name: Install Windows build prerequisites (CMake + NASM)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          choco install nasm -y
+
       # Linux 特定依赖
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'

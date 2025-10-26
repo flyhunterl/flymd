@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 // 直连 S3/R2（SigV4）最小实现：
 // - 支持 path-style 与自定义域名
 // - 默认模板 {year}/{month}{fileName}{md5}.{extName}
@@ -277,6 +278,59 @@ export async function uploadImageToS3R2(input: Blob | ArrayBuffer | Uint8Array, 
   else bytes = input
 
   const key = await makeKeyFromTemplate(cfg.keyTemplate || '{year}/{month}{fileName}{md5}.{extName}', fileName, contentType, bytes)
+  // 方案A：优先使用后端 SDK 直传（与 PicList 一致）
+  if (isTauriRuntime()) {
+    try {
+      const resp = await invoke<{ key: string; public_url: string }>('upload_to_s3', {
+        req: {
+          accessKeyId: cfg.accessKeyId,
+          secretAccessKey: cfg.secretAccessKey,
+          bucket: cfg.bucket,
+          region,
+          endpoint: cfg.endpoint,
+          forcePathStyle: forcePathStyle,
+          aclPublicRead: aclPublicRead,
+          customDomain: cfg.customDomain,
+          key,
+          contentType,
+          bytes: Array.from(new Uint8Array(bytes))
+        }
+      })
+      return { key: resp.key, publicUrl: resp.public_url }
+    } catch (e) {
+      console.warn('upload_to_s3 (sdk) failed, fallback to presign', e)
+      // 方案B 作为兜底：预签名 + PUT（插件/浏览器）
+      try {
+        const pres = await invoke<{ put_url: string; public_url: string }>('presign_put', {
+          req: {
+            accessKeyId: cfg.accessKeyId,
+            secretAccessKey: cfg.secretAccessKey,
+            bucket: cfg.bucket,
+            region,
+            endpoint: cfg.endpoint,
+            forcePathStyle: forcePathStyle,
+            customDomain: cfg.customDomain,
+            key,
+            expires: 600
+          }
+        })
+        // 插件优先
+        try {
+          const client = await tryPluginHttp()
+          if (client && client.fetch && client.Body) {
+            const body = new Uint8Array(bytes)
+            const r1 = await client.fetch(pres.put_url, { method: 'PUT', body: client.Body.bytes(body) })
+            if (r1 && (r1.ok === true || (typeof r1.status === 'number' && r1.status >= 200 && r1.status < 300))) {
+              return { key, publicUrl: pres.public_url }
+            }
+          }
+        } catch {}
+        const r2 = await fetch(pres.put_url, { method: 'PUT', body: bytes })
+        if (r2.ok) return { key, publicUrl: pres.public_url }
+      } catch {}
+      // 仍失败则走本地兜底
+    }
+  }
   const { url, hostForSig, canonicalUri } = buildUploadUrl(endpointUrl, cfg.bucket, key, forcePathStyle)
 
   const { amzDate, dateStamp } = formatAmzDate()
@@ -343,3 +397,4 @@ export async function uploadImageToS3R2(input: Blob | ArrayBuffer | Uint8Array, 
   const publicUrl = buildPublicUrl(cfg.customDomain, endpointUrl, cfg.bucket, key, forcePathStyle)
   return { key, publicUrl }
 }
+
