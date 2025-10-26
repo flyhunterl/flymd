@@ -318,11 +318,39 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
               <button id="about-close" class="about-close" title="关闭">×</button>
             </div>
             <div class="about-body">
-              <p>一款跨平台、轻量稳定好用的 Markdown 编辑预览器。</p>
+              <p>跨平台的轻量的Markdown 编辑预览器。</p>
             </div>
           </div>
         `
         containerEl.appendChild(about)
+        try {
+          const aboutBody = about.querySelector('.about-body') as HTMLDivElement | null
+          if (aboutBody) {
+            aboutBody.innerHTML = `
+              <p>\u4e00\u6b3e\u8de8\u5e73\u53f0\u3001\u8f7b\u91cf\u7a33\u5b9a\u597d\u7528\u7684 Markdown \u7f16\u8f91\u9884\u89c8\u5668\u3002</p>
+              <div class="about-subtitle">\u5feb\u6377\u952e</div>
+              <div class="about-shortcuts">
+                <div class="sc-act">\u6253\u5f00\u6587\u4ef6</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>O</kbd></div>
+                <div class="sc-act">\u4fdd\u5b58</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>S</kbd></div>
+                <div class="sc-act">\u53e6\u5b58\u4e3a</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></div>
+                <div class="sc-act">\u65b0\u5efa</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>N</kbd></div>
+                <div class="sc-act">\u7f16\u8f91/\u9884\u89c8</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>E</kbd></div>
+                <div class="sc-act">\u63d2\u5165\u94fe\u63a5</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>K</kbd></div>
+                <div class="sc-act">\u52a0\u7c97</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>B</kbd></div>
+                <div class="sc-act">\u659c\u4f53</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>I</kbd></div>
+                <div class="sc-act">\u9000\u51fa\u9884\u89c8/\u5173\u95ed\u5f39\u7a97</div><div class="sc-keys"><kbd>Esc</kbd></div>
+              </div>
+              <div class="about-links">
+                <p>\u4e2a\u4eba\u7f51\u7ad9\uff1a<a href="https://www.llingfei.com" target="_blank" rel="noopener noreferrer">https://www.llingfei.com</a></p>
+                <p>GitHub \u5730\u5740\uff1a<a href="https://github.com/flyhunterl/flymd" target="_blank" rel="noopener noreferrer">https://github.com/flyhunterl/flymd</a></p>
+              </div>
+            `
+          }
+          const aboutTitle = about.querySelector('#about-title') as HTMLDivElement | null
+          if (aboutTitle) aboutTitle.textContent = `\u5173\u4e8e \u98de\u901fMarkDown (flyMD) v${APP_VERSION}`
+          const aboutClose = about.querySelector('#about-close') as HTMLButtonElement | null
+          if (aboutClose) { aboutClose.textContent = '\u00D7'; aboutClose.title = '\u5173\u95ed' }
+        } catch {}
     try {
     const overlay = document.getElementById('about-overlay') as HTMLDivElement | null
     const dialog = overlay?.querySelector('.about-dialog') as HTMLDivElement | null
