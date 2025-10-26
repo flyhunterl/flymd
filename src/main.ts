@@ -42,6 +42,7 @@ let mermaidReady = false
 
 // 应用状态
 let fileTreeReady = false
+let mode: Mode = 'edit'
 // 库侧栏选中状态
 let selectedFolderPath: string | null = null
 let selectedNodeEl: HTMLElement | null = null
@@ -1710,7 +1711,11 @@ function bindEvents() {
   
   // 快捷键：插入链接、重命名、删除（库树）
   document.addEventListener('keydown', guard(async (e: KeyboardEvent) => {
+    // 编辑快捷键（全局）：插入链接 / 加粗 / 斜体
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); guard(insertLink)(); return }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') { e.preventDefault(); await toggleMode(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); guard(formatBold)(); if (mode === 'preview') void renderPreview(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'i') { e.preventDefault(); guard(formatItalic)(); if (mode === 'preview') void renderPreview(); return }
     try {
       const lib = document.getElementById('library') as HTMLDivElement | null
       const libVisible = lib && !lib.classList.contains('hidden')
