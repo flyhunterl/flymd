@@ -21,7 +21,7 @@ import { Store } from '@tauri-apps/plugin-store'
 import { open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import fileTree from './fileTree'
 import { uploadImageToS3R2, type UploaderConfig } from './uploader/s3'
 import appIconUrl from '../flymd.png?url'
@@ -1605,29 +1605,74 @@ async function renameFileSafe(p: string, newName: string): Promise<string> {
   return dst
 }
 // 安全删除：优先直接删除；若为目录或遇到占用异常，尝试递归删除目录内容后再删
-async function deleteFileSafe(p: string): Promise<void> {
-  try {
-    await remove(p)
-    return
-  } catch (e1) {
+async function deleteFileSafe(p: string, permanent = false): Promise<void> {
+  console.log('[deleteFileSafe] 开始删除:', { path: p, permanent })
+
+  // 第一步：尝试移至回收站（如果不是永久删除）
+  if (!permanent && typeof invoke === 'function') {
     try {
+      console.log('[deleteFileSafe] 调用 move_to_trash')
+      await invoke('move_to_trash', { path: p })
+      // 验证删除是否成功
+      const stillExists = await exists(p)
+      console.log('[deleteFileSafe] 回收站删除后检查文件是否存在:', stillExists)
+      if (!stillExists) {
+        console.log('[deleteFileSafe] 文件已成功移至回收站')
+        return
+      }
+      console.warn('[deleteFileSafe] 文件移至回收站后仍然存在，尝试永久删除')
+    } catch (e) {
+      console.warn('[deleteFileSafe] 移至回收站失败，尝试永久删除:', e)
+    }
+  }
+
+  // 第二步：永久删除（带重试机制）
+  const maxRetries = 3
+  let lastError: any = null
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // 尝试直接删除
+      await remove(p)
+
+      // 验证删除是否成功
+      const stillExists = await exists(p)
+      if (!stillExists) return
+
+      // 文件仍存在，可能需要递归删除目录
       const st: any = await stat(p)
-      const isDir = !!st?.isDirectory
-      if (!isDir) throw e1
-      // 目录：递归删除子项
-      try {
+      if (st?.isDirectory) {
+        // 递归删除目录中的所有子项
         const ents = (await readDir(p, { recursive: false } as any)) as any[]
         for (const it of ents) {
           const child = typeof it?.path === 'string' ? it.path : (p + (p.includes('\\') ? '\\' : '/') + (it?.name || ''))
-          await deleteFileSafe(child)
+          await deleteFileSafe(child, true) // 递归时直接永久删除
         }
-      } catch {}
-      await remove(p)
-      return
-    } catch {
-      throw e1
+        // 删除空目录
+        await remove(p)
+      } else if (typeof invoke === 'function') {
+        // 文件删除失败，尝试后端强制删除
+        await invoke('force_remove_path', { path: p })
+      }
+
+      // 最终验证
+      const finalCheck = await exists(p)
+      if (!finalCheck) return
+
+      throw new Error('文件仍然存在（可能被其他程序占用）')
+    } catch (e) {
+      lastError = e
+      // 如果还有重试机会，等待后重试
+      if (attempt < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)))
+        continue
+      }
+      // 最后一次尝试也失败了
+      throw e
     }
   }
+
+  throw lastError ?? new Error('删除失败')
 }
 async function newFileSafe(dir: string, name = '新建文档.md'): Promise<string> {
   const sep = dir.includes('\\') ? '\\' : '/'
@@ -1679,6 +1724,7 @@ async function newFileSafe(dir: string, name = '新建文档.md'): Promise<strin
        row.setAttribute('draggable','true')
        row.addEventListener('dragstart', (ev) => { try { ev.dataTransfer?.setData('text/plain', e.path); if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move' } catch {} })
       row.addEventListener('click', async () => {
+        selectLibraryNode(row, e.path, false)
         await openFile2(e.path)
       })
       container.appendChild(row)
@@ -1760,7 +1806,7 @@ function bindEvents() {
     menu.innerHTML = ''
     if (isDir) { menu.appendChild(mkItem('在此新建文档', async () => { try { const p2 = await newFileSafe(path); await openFile2(p2); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {}; const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; const n2 = Array.from((document.getElementById('lib-tree')||document.body).querySelectorAll('.lib-node.lib-dir') as any).find((n:any) => n.dataset?.path === path); if (n2) n2.dispatchEvent(new MouseEvent('click', { bubbles: true })) } catch (e) { showError('新建失败', e) } })) }
     menu.appendChild(mkItem('重命名', async () => { try { const base = path.replace(/[\\/][^\\/]*$/, ''); const oldFull = path.split(/[\\/]+/).pop() || ''; const m = oldFull.match(/^(.*?)(\.[^.]+)?$/); const oldStem = (m?.[1] || oldFull); const oldExt = (m?.[2] || ''); const newStem = await openRenameDialog(oldStem, oldExt); if (!newStem || newStem === oldStem) return; const name = newStem + oldExt; const dst = base + (base.includes('\\') ? '\\' : '/') + name; if (await exists(dst)) { alert('同名已存在'); return } await moveFileSafe(path, dst); if (currentFilePath === path) { currentFilePath = dst as any; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; try { const nodes = Array.from((document.getElementById('lib-tree')||document.body).querySelectorAll('.lib-node') as any) as HTMLElement[]; const node = nodes.find(n => (n as any).dataset?.path === dst); if (node) node.dispatchEvent(new MouseEvent('click', { bubbles: true })) } catch {} } catch (e) { showError('重命名失败', e) } }))
-    menu.appendChild(mkItem('删除', async () => { try { const ok = await confirmNative('确定删除？不可恢复'); if (!ok) return; await deleteFileSafe(path); if (currentFilePath === path) { await fileTree.newFileInSelected(); mode = 'edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('删除失败', e) } }))
+    menu.appendChild(mkItem('删除', async () => { try { console.log('[删除] 右键菜单删除, 路径:', path); const ok = await confirmNative('确定删除？将移至回收站'); console.log('[删除] 用户确认结果:', ok); if (!ok) return; console.log('[删除] 开始删除文件'); await deleteFileSafe(path, false); console.log('[删除] 删除完成'); if (currentFilePath === path) { await fileTree.newFileInSelected(); mode = 'edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('删除失败', e) } }))
     menu.style.left = Math.min(ev.clientX, (window.innerWidth - 180)) + 'px'
     menu.style.top = Math.min(ev.clientY, (window.innerHeight - 120)) + 'px'
     menu.style.display = 'block'
@@ -1824,9 +1870,14 @@ function bindEvents() {
       }
       if (e.key === 'Delete') {
         e.preventDefault()
-        const ok = await confirmNative('确定删除所选项？不可恢复')
+        console.log('[删除] Delete键被按下, 路径:', p, 'Shift键:', e.shiftKey)
+        const isPermanent = e.shiftKey
+        const ok = await confirmNative(isPermanent ? '确定永久删除所选项？不可恢复' : '确定删除所选项？将移至回收站')
+        console.log('[删除] 用户确认结果:', ok)
         if (!ok) return
-        await deleteFileSafe(p)
+        console.log('[删除] 开始删除文件:', p, '永久删除:', isPermanent)
+        await deleteFileSafe(p, isPermanent)
+        console.log('[删除] 删除完成')
         if (currentFilePath === p) { await fileTree.newFileInSelected(); mode = 'edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {}; }
         const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }
         return

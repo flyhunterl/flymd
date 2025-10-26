@@ -266,7 +266,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
@@ -302,5 +302,33 @@ fn main() {
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn move_to_trash(path: String) -> Result<(), String> {
+  // 使用 trash crate 跨平台移动到回收站
+  tauri::async_runtime::spawn_blocking(move || {
+    trash::delete(path).map_err(|e| format!("move_to_trash error: {e}"))
+  })
+  .await
+  .map_err(|e| format!("join error: {e}"))??;
+  Ok(())
+}
+
+#[tauri::command]
+async fn force_remove_path(path: String) -> Result<(), String> {
+  use std::fs;
+  use std::path::PathBuf;
+  let pathbuf = PathBuf::from(path);
+  tauri::async_runtime::spawn_blocking(move || {
+    if pathbuf.is_dir() {
+      fs::remove_dir_all(&pathbuf).map_err(|e| format!("remove_dir_all error: {e}"))
+    } else {
+      fs::remove_file(&pathbuf).map_err(|e| format!("remove_file error: {e}"))
+    }
+  })
+  .await
+  .map_err(|e| format!("join error: {e}"))??;
+  Ok(())
 }
 
