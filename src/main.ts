@@ -16,7 +16,7 @@ import DOMPurify from 'dompurify'
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
-import { readTextFile, writeTextFile, readDir, stat } from '@tauri-apps/plugin-fs'
+import { readTextFile, writeTextFile, readDir, stat, readFile } from '@tauri-apps/plugin-fs'
 import { Store } from '@tauri-apps/plugin-store'
 import { open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -552,11 +552,24 @@ async function renderPreview() {
 
   // 配置 DOMPurify 允许 SVG 和 MathML
   const safe = DOMPurify.sanitize(html, {
+    // 允许基础 SVG/Math 相关标签
     ADD_TAGS: ['svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'g', 'text', 'tspan', 'defs', 'marker', 'use', 'clipPath', 'mask', 'pattern', 'foreignObject'],
     ADD_ATTR: ['viewBox', 'xmlns', 'fill', 'stroke', 'stroke-width', 'd', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'transform', 'class', 'id', 'style', 'points', 'preserveAspectRatio', 'markerWidth', 'markerHeight', 'refX', 'refY', 'orient', 'markerUnits', 'fill-opacity', 'stroke-dasharray'],
     KEEP_CONTENT: true,
     RETURN_DOM: false,
-    RETURN_DOM_FRAGMENT: false
+    RETURN_DOM_FRAGMENT: false,
+    // 关键修复：放行会在后续被我们转换为 asset: 的 URL 形态，
+    // 包含：
+    //  - http/https/data/blob/asset 协议
+    //  - 以 / 开头的绝对路径（类 Unix）与 ./、../ 相对路径
+    //  - Windows 盘符路径（如 D:\\...）与 UNC 路径（\\\\server\\share\\...）
+    // 这样 DOMPurify 不会把 img[src] 移除，随后逻辑才能识别并用 convertFileSrc() 转为 asset: URL。
+    // 允许以下 URL 形态：
+    //  - 常见协议：http/https/data/blob/asset/file
+    //  - 绝对/相对路径：/、./、../
+    //  - Windows 盘符：D:\ 或 D:/ 或 D:%5C（反斜杠被 URL 编码）或 D:%2F
+    //  - 编码后的 UNC：%5C%5Cserver%5Cshare...
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|asset|data|blob|file):|\/|\.\.?[\/\\]|[a-zA-Z]:(?:[\/\\]|%5[cC]|%2[fF])|(?:%5[cC]){2})/i
   })
 
   console.log('DOMPurify 清理后的 HTML 片段:', safe.substring(0, 500))
@@ -575,12 +588,49 @@ async function renderPreview() {
       try {
         const el = img as HTMLImageElement
         const src = el.getAttribute('src') || ''
+        let srcDec = src
+        try {
+          // 尽力解码 URL 编码的反斜杠（%5C）与其它字符，便于后续本地路径识别
+          srcDec = decodeURIComponent(src)
+        } catch {}
         // 跳过已可用的协议
         if (/^(data:|blob:|asset:|https?:)/i.test(src)) return
-        if (!base && !(/^[a-zA-Z]:\\|^\\\\|^\//.test(src))) return
+        const isWinDrive = /^[a-zA-Z]:/.test(srcDec)
+        const isUNC = /^\\\\/.test(srcDec)
+        const isUnixAbs = /^\//.test(srcDec)
+        // base 不存在且既不是绝对路径、UNC、Windows 盘符，也不是 file: 时，直接忽略
+        if (!base && !(isWinDrive || isUNC || isUnixAbs || /^file:/i.test(src) || /^(?:%5[cC]){2}/.test(src))) return
         let abs: string
-        if (/^[a-zA-Z]:\\|^\\\\|^\//.test(src)) {
-          abs = src
+        if (isWinDrive || isUNC || isUnixAbs) {
+          abs = srcDec
+          if (isWinDrive) {
+            // 统一 Windows 盘符路径分隔符
+            abs = abs.replace(/\//g, '\\')
+          }
+          if (isUNC) {
+            // 确保 UNC 使用反斜杠
+            abs = abs.replace(/\//g, '\\')
+          }
+        } else if (/^(?:%5[cC]){2}/.test(src)) {
+          // 处理被编码的 UNC：%5C%5Cserver%5Cshare%5C...
+          try {
+            const unc = decodeURIComponent(src)
+            abs = unc.replace(/\//g, '\\')
+          } catch { abs = src.replace(/%5[cC]/g, '\\') }
+        } else if (/^file:/i.test(src)) {
+          // 处理 file:// 形式，本地文件 URI 转为本地系统路径
+          try {
+            const u = new URL(src)
+            let p = u.pathname || ''
+            // Windows 场景：/D:/path => D:/path
+            if (/^\/[a-zA-Z]:\//.test(p)) p = p.slice(1)
+            p = decodeURIComponent(p)
+            // 统一为 Windows 反斜杠，交由 convertFileSrc 处理
+            if (/^[a-zA-Z]:\//.test(p)) p = p.replace(/\//g, '\\')
+            abs = p
+          } catch {
+            abs = src.replace(/^file:\/\//i, '')
+          }
         } else {
           const sep = base.includes('\\') ? '\\' : '/'
           const parts = (base + sep + src).split(/[\\/]+/)
@@ -592,6 +642,44 @@ async function renderPreview() {
           }
           abs = base.includes('\\') ? stack.join('\\') : '/' + stack.join('/')
         }
+        // 先监听错误，若 asset: 加载失败则回退为 data: URL
+        let triedFallback = false
+        const onError = async () => {
+          if (triedFallback) return
+          triedFallback = true
+          try {
+            if (typeof readFile !== 'function') return
+            const bytes = await readFile(abs as any)
+            // 通过 Blob+FileReader 转 data URL，避免手写 base64
+            const mime = (() => {
+              const m = (abs || '').toLowerCase().match(/\.([a-z0-9]+)$/)
+              switch (m?.[1]) {
+                case 'jpg':
+                case 'jpeg': return 'image/jpeg'
+                case 'png': return 'image/png'
+                case 'gif': return 'image/gif'
+                case 'webp': return 'image/webp'
+                case 'bmp': return 'image/bmp'
+                case 'avif': return 'image/avif'
+                case 'ico': return 'image/x-icon'
+                case 'svg': return 'image/svg+xml'
+                default: return 'application/octet-stream'
+              }
+            })()
+            const blob = new Blob([bytes], { type: mime })
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              try {
+                const fr = new FileReader()
+                fr.onerror = () => reject(fr.error || new Error('读取图片失败'))
+                fr.onload = () => resolve(String(fr.result || ''))
+                fr.readAsDataURL(blob)
+              } catch (e) { reject(e as any) }
+            })
+            el.src = dataUrl
+          } catch {}
+        }
+        el.addEventListener('error', onError, { once: true })
+
         const url = typeof convertFileSrc === 'function' ? convertFileSrc(abs) : abs
         el.src = url
       } catch {}
@@ -1422,7 +1510,10 @@ function bindEvents() {
             if (imgs.length > 0) {
               const toLabel = (p: string) => { const segs = p.split(/[\\/]+/); return segs[segs.length - 1] || 'image' }
               // 直接插入原始本地路径；预览阶段会自动转换为 asset: 以便显示
-              const toMdUrl = (p: string) => /[\s()]/.test(p) ? `<${p}>` : p
+              const toMdUrl = (p: string) => {
+                const needAngle = /[\s()]/.test(p) || /^[a-zA-Z]:/.test(p) || /\\/.test(p)
+                return needAngle ? `<${p}>` : p
+              }
               const text = imgs.map((p) => `![${toLabel(p)}](${toMdUrl(p)})`).join('\n')
               insertAtCursor(text)
               if (mode === 'preview') await renderPreview()
