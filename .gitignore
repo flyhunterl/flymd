@@ -45,3 +45,4 @@ q.md
 # 本地 AI/调试等与程序无关的目录/文件
 .claude/
 DEBUG_PATCH_MARKER.txt
+next.md

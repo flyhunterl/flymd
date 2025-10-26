@@ -334,3 +334,12 @@ html, body { overflow: hidden; }
 /* 程序图标作为文件夹图标 */
 .library .lib-ico-app { width: 16px; height: 16px; border-radius: 3px; object-fit: cover; }
 
+
+/* 库侧栏选中态 */
+.library .lib-node.selected { background: rgba(127,127,127,0.16); }
+
+
+/* FileTree Modals */
+#ft-modal { font-size: 13px; }
+#ft-modal .ft-box button { cursor: pointer; }
+
