@@ -16,7 +16,7 @@ import DOMPurify from 'dompurify'
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
-import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
+import { readTextFile, writeTextFile, readDir, stat } from '@tauri-apps/plugin-fs'
 import { Store } from '@tauri-apps/plugin-store'
 import { open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -266,6 +266,12 @@ if (menubar) {
   recentBtn.title = '最近文件'
   recentBtn.textContent = '最近'
   menubar.appendChild(recentBtn)
+  const libBtn = document.createElement('div')
+  libBtn.id = 'btn-library'
+  libBtn.className = 'menu-item'
+  libBtn.title = "\u6587\u6863\u5e93\u4fa7\u680f"
+  libBtn.textContent = "\u5e93"
+  menubar.appendChild(libBtn)
   const aboutBtn = document.createElement('div')
   aboutBtn.id = 'btn-about'
   aboutBtn.className = 'menu-item'
@@ -280,38 +286,43 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
   panel.className = 'recent-panel hidden'
   containerEl.appendChild(panel)
 
-  // 关于弹窗（初始隐藏）
-  const about = document.createElement('div')
-  about.id = 'about-overlay'
-  about.className = 'about-overlay hidden'
-  about.innerHTML = `
-    <div class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
-      <div class="about-header">
-        <div id="about-title">关于 飞速MarkDown (flyMD) v${APP_VERSION}</div>
-        <button id="about-close" class="about-close" title="关闭">×</button>
-      </div>
-      <div class="about-body">
-        <p>一个跨平台的轻量级、稳定易用的 Markdown 文档编辑预览工具。</p>
-        <div class="about-subtitle">快捷键</div>
-        <div class="about-shortcuts">
-          <div class="sc-act">打开文件</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>O</kbd></div>
-          <div class="sc-act">保存</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>S</kbd></div>
-          <div class="sc-act">另存为</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></div>
-          <div class="sc-act">新建</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>N</kbd></div>
-          <div class="sc-act">编辑/预览</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>E</kbd></div>
-          <div class="sc-act">插入链接</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>K</kbd></div>
-          <div class="sc-act">加粗</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>B</kbd></div>
-          <div class="sc-act">斜体</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>I</kbd></div>
-          <div class="sc-act">退出预览/关闭弹窗</div><div class="sc-keys"><kbd>Esc</kbd></div>
-        </div>
-        <div class="about-links">
-          <p>个人网站：<a href="https://www.llingfei.com" target="_blank" rel="noopener noreferrer">https://www.llingfei.com</a></p>
-          <p>GitHub 地址：<a href="https://github.com/flyhunterl/flymd" target="_blank" rel="noopener noreferrer">https://github.com/flyhunterl/flymd</a></p>
-        </div>
-      </div>
+  // �ĵ��ⲿ(�ⲿ)
+  const library = document.createElement('div')
+  library.id = 'library'
+  library.className = 'library hidden'
+  library.innerHTML = `
+    <div class="lib-header">
+      <div class="lib-path" id="lib-path"></div>
+      <button class="lib-btn" id="lib-choose"></button>
+      <button class="lib-btn" id="lib-refresh"></button>
     </div>
+    <div class="lib-tree" id="lib-tree"></div>
   `
-    containerEl.appendChild(about)
+  containerEl.appendChild(library)
+  try {
+    const elPath = library.querySelector('#lib-path') as HTMLDivElement | null
+    const elChoose = library.querySelector('#lib-choose') as HTMLButtonElement | null
+    const elRefresh = library.querySelector('#lib-refresh') as HTMLButtonElement | null
+    if (elPath) elPath.textContent = '\u672a\u9009\u62e9\u5e93\u76ee\u5f55'
+    if (elChoose) elChoose.textContent = '\u9009\u62e9\u5e93'
+    if (elRefresh) elRefresh.textContent = '\u5237\u65b0'
+  } catch {}
+        // 重新创建关于对话框并挂载
+        const about = document.createElement('div')
+        about.id = 'about-overlay'
+        about.className = 'about-overlay hidden'
+        about.innerHTML = `
+          <div class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
+            <div class="about-header">
+              <div id="about-title">关于 飞速MarkDown (flyMD) v${APP_VERSION}</div>
+              <button id="about-close" class="about-close" title="关闭">×</button>
+            </div>
+            <div class="about-body">
+              <p>一款跨平台、轻量稳定好用的 Markdown 编辑预览器。</p>
+            </div>
+          </div>
+        `
+        containerEl.appendChild(about)
     try {
     const overlay = document.getElementById('about-overlay') as HTMLDivElement | null
     const dialog = overlay?.querySelector('.about-dialog') as HTMLDivElement | null
@@ -958,6 +969,140 @@ async function renderRecentPanel(toggle = true) {
 
 
 // 显示/隐藏 关于 弹窗
+// 文档库（阶段A：最小实现）
+type LibEntry = { name: string; path: string; isDir: boolean }
+
+async function getLibraryRoot(): Promise<string | null> {
+  try {
+    if (!store) return null
+    const val = await store.get('libraryRoot')
+    return (typeof val === 'string' && val) ? val : null
+  } catch { return null }
+}
+
+async function setLibraryRoot(p: string) {
+  try {
+    if (!store) return
+    await store.set('libraryRoot', p)
+    await store.save()
+  } catch {}
+}
+
+function showLibrary(show: boolean) {
+  const lib = document.getElementById('library') as HTMLDivElement | null
+  const container = document.querySelector('.container') as HTMLDivElement | null
+  if (!lib || !container) return
+  if (show) { lib.classList.remove('hidden'); container.classList.add('with-library') }
+  else { lib.classList.add('hidden'); container.classList.remove('with-library') }
+}
+
+async function pickLibraryRoot(): Promise<string | null> {
+  try {
+    const sel = await open({ directory: true, multiple: false } as any)
+    if (!sel) return null
+    const p = normalizePath(sel)
+    if (!p) return null
+    await setLibraryRoot(p)
+    return p
+  } catch (e) {
+    showError('选择库目录失败', e)
+    return null
+  }
+}
+
+async function listDirOnce(dir: string): Promise<LibEntry[]> {
+  try {
+    const entries = await readDir(dir, { recursive: false } as any)
+    const result: LibEntry[] = []
+    for (const it of (entries as any[] || [])) {
+      const p: string = typeof it?.path === 'string' ? it.path : (dir + (dir.includes('\\') ? '\\' : '/') + (it?.name || ''))
+      try {
+        const s = await stat(p)
+        const isDir = !!(s as any)?.isDirectory
+        if (!isDir) {
+          const name = (it?.name || p.split(/[\\/]+/).pop() || '') as string
+          if (!/\.(md|markdown|txt)$/i.test(name)) continue
+        }
+        result.push({ name: (it?.name || p.split(/[\\/]+/).pop() || '') as string, path: p, isDir })
+      } catch {}
+    }
+    result.sort((a, b) => (a.isDir === b.isDir) ? a.name.localeCompare(b.name) : (a.isDir ? -1 : 1))
+    return result
+  } catch (e) {
+    showError('读取库目录失败', e)
+    return []
+  }
+}
+
+async function renderLibraryRoot() {
+  const root = await getLibraryRoot()
+  const pathEl = document.getElementById('lib-path') as HTMLDivElement | null
+  const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null
+  if (!pathEl || !treeEl) return
+  treeEl.innerHTML = ''
+  if (!root) {
+    pathEl.textContent = '\u672a\u9009\u62e9\u5e93\u76ee\u5f55'
+    treeEl.innerHTML = '<div class="lib-empty">\u5c1a\u672a\u9009\u62e9\u5e93\u76ee\u5f55</div>'
+    return
+  }
+  pathEl.textContent = root
+  const top = document.createElement('div')
+  top.className = 'lib-node lib-dir'
+  top.innerHTML = `<span class="lib-toggle">v</span><span class="lib-ico lib-ico-dir"></span><span class="lib-name">${root.split(/[\\/]+/).pop() || root}</span>`
+  const children = document.createElement('div')
+  children.className = 'lib-children'
+  treeEl.appendChild(top)
+  treeEl.appendChild(children)
+  await renderDir(children as HTMLDivElement, root)
+
+  let expanded = true
+  top.addEventListener('click', async () => {
+    expanded = !expanded
+    children.style.display = expanded ? '' : 'none'
+    const tg = top.querySelector('.lib-toggle') as HTMLSpanElement | null
+    if (tg) tg.textContent = expanded ? 'v' : '>'
+    if (expanded && children.childElementCount === 0) {
+      await renderDir(children as HTMLDivElement, root)
+    }
+  })
+}
+
+async function renderDir(container: HTMLDivElement, dir: string) {
+  container.innerHTML = ''
+  const entries = await listDirOnce(dir)
+  for (const e of entries) {
+    if (e.isDir) {
+      const row = document.createElement('div')
+      row.className = 'lib-node lib-dir'
+      row.innerHTML = `<span class="lib-toggle">></span><span class="lib-ico lib-ico-dir"></span><span class="lib-name">${e.name}</span>`
+      const kids = document.createElement('div')
+      kids.className = 'lib-children'
+      kids.style.display = 'none'
+      container.appendChild(row)
+      container.appendChild(kids)
+      let expanded = false
+      row.addEventListener('click', async () => {
+        expanded = !expanded
+        kids.style.display = expanded ? '' : 'none'
+        const tg = row.querySelector('.lib-toggle') as HTMLSpanElement | null
+        if (tg) tg.textContent = expanded ? 'v' : '>'
+        if (expanded && kids.childElementCount === 0) {
+          await renderDir(kids as HTMLDivElement, e.path)
+        }
+      })
+    } else {
+      const row = document.createElement('div')
+      row.className = 'lib-node lib-file'
+      row.innerHTML = `<span class="lib-ico lib-ico-file"></span><span class="lib-name">${e.name}</span>`
+      row.title = e.path
+      row.addEventListener('click', async () => {
+        await openFile2(e.path)
+      })
+      container.appendChild(row)
+    }
+  }
+}
+
 function showAbout(show: boolean) {
   const overlay = document.getElementById('about-overlay') as HTMLDivElement | null
   if (!overlay) return
@@ -983,6 +1128,7 @@ function bindEvents() {
   const btnToggle = document.getElementById('btn-toggle')
   const btnNew = document.getElementById('btn-new')
   const btnRecent = document.getElementById('btn-recent')
+  const btnLibrary = document.getElementById('btn-library')
   const btnAbout = document.getElementById('btn-about')
 
   if (btnOpen) btnOpen.addEventListener('click', guard(() => openFile2()))
@@ -991,6 +1137,16 @@ function bindEvents() {
   if (btnToggle) btnToggle.addEventListener('click', guard(() => toggleMode()))
   if (btnNew) btnNew.addEventListener('click', guard(() => newFile()))
   if (btnRecent) btnRecent.addEventListener('click', guard(() => renderRecentPanel(true)))
+  if (btnLibrary) btnLibrary.addEventListener('click', guard(async () => {
+    const lib = document.getElementById('library')
+    const showing = lib && !lib.classList.contains('hidden')
+    if (showing) { showLibrary(false); return }
+    // 显示并准备数据
+    showLibrary(true)
+    let root = await getLibraryRoot()
+    if (!root) root = await pickLibraryRoot()
+    await renderLibraryRoot()
+  }))
   if (btnAbout) btnAbout.addEventListener('click', guard(() => showAbout(true)))
 
   // 文本变化
@@ -1132,6 +1288,14 @@ function bindEvents() {
     }
   })
 
+  // 库按钮内部操作
+  try {
+    const chooseBtn = document.getElementById('lib-choose') as HTMLButtonElement | null
+    const refreshBtn = document.getElementById('lib-refresh') as HTMLButtonElement | null
+    if (chooseBtn) chooseBtn.addEventListener('click', guard(async () => { await pickLibraryRoot(); await renderLibraryRoot() }))
+    if (refreshBtn) refreshBtn.addEventListener('click', guard(async () => { await renderLibraryRoot() }))
+  } catch {}
+
   // 关于弹窗：点击遮罩或“关闭”按钮关闭
   const overlay = document.getElementById('about-overlay') as HTMLDivElement | null
   if (overlay) {
@@ -1230,5 +1394,7 @@ function bindEvents() {
     }
   }
 })()
+
+
 
 
