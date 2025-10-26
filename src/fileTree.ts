@@ -168,7 +168,7 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
       row.appendChild(ico); row.appendChild(label)
       try { const ext = (e.name.split('.').pop() || '').toLowerCase(); if (ext) row.classList.add('file-ext-' + ext) } catch {}
 
-      row.addEventListener('click', () => { saveSelection(e.path, false, row) })
+      row.addEventListener('click', async () => { saveSelection(e.path, false, row); try { await state.opts?.onOpenFile(e.path) } catch {} })
       row.addEventListener('dblclick', async () => { await state.opts?.onOpenFile(e.path) })
 
       row.setAttribute('draggable','true')
