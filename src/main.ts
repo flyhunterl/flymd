@@ -1058,24 +1058,62 @@ async function pickLibraryRoot(): Promise<string | null> {
   }
 }
 
+// 支持的文档后缀判断（库侧栏）
+function isSupportedDoc(name: string): boolean { return /\.(md|markdown|txt)$/i.test(name) }
+
+// 目录递归包含受支持文档的缓存
+const libHasDocCache = new Map<string, boolean>()
+const libHasDocPending = new Map<string, Promise<boolean>>()
+
+async function dirHasSupportedDocRecursive(dir: string, depth = 20): Promise<boolean> {
+  try {
+    if (libHasDocCache.has(dir)) return libHasDocCache.get(dir) as boolean
+    if (libHasDocPending.has(dir)) return await (libHasDocPending.get(dir) as Promise<boolean>)
+
+    const p = (async (): Promise<boolean> => {
+      if (depth <= 0) { libHasDocCache.set(dir, false); return false }
+      let entries: any[] = []
+      try { entries = await readDir(dir, { recursive: false } as any) as any[] } catch { entries = [] }
+      for (const it of (entries || [])) {
+        const full: string = typeof it?.path === 'string' ? it.path : (dir + (dir.includes('\\') ? '\\' : '/') + (it?.name || ''))
+        const name = (it?.name || full.split(/[\\/]+/).pop() || '') as string
+        try { const s = await stat(full); const isDir = !!(s as any)?.isDirectory; if (!isDir && isSupportedDoc(name)) { libHasDocCache.set(dir, true); return true } } catch {}
+      }
+      for (const it of (entries || [])) {
+        const full: string = typeof it?.path === 'string' ? it.path : (dir + (dir.includes('\\') ? '\\' : '/') + (it?.name || ''))
+        try { const s = await stat(full); const isDir = !!(s as any)?.isDirectory; if (isDir) { const ok = await dirHasSupportedDocRecursive(full, depth - 1); if (ok) { libHasDocCache.set(dir, true); return true } } } catch {}
+      }
+      libHasDocCache.set(dir, false); return false
+    })()
+    libHasDocPending.set(dir, p); const r = await p; libHasDocPending.delete(dir); return r
+  } catch { return false }
+}
+
 async function listDirOnce(dir: string): Promise<LibEntry[]> {
   try {
     const entries = await readDir(dir, { recursive: false } as any)
-    const result: LibEntry[] = []
+    const files: LibEntry[] = []
+    const dirCandidates: LibEntry[] = []
     for (const it of (entries as any[] || [])) {
       const p: string = typeof it?.path === 'string' ? it.path : (dir + (dir.includes('\\') ? '\\' : '/') + (it?.name || ''))
       try {
         const s = await stat(p)
         const isDir = !!(s as any)?.isDirectory
-        if (!isDir) {
-          const name = (it?.name || p.split(/[\\/]+/).pop() || '') as string
-          if (!/\.(md|markdown|txt)$/i.test(name)) continue
+        const name = (it?.name || p.split(/[\\/]+/).pop() || '') as string
+        if (isDir) {
+          dirCandidates.push({ name, path: p, isDir: true })
+        } else {
+          if (isSupportedDoc(name)) files.push({ name, path: p, isDir: false })
         }
-        result.push({ name: (it?.name || p.split(/[\\/]+/).pop() || '') as string, path: p, isDir })
       } catch {}
     }
-    result.sort((a, b) => (a.isDir === b.isDir) ? a.name.localeCompare(b.name) : (a.isDir ? -1 : 1))
-    return result
+    const keptDirs: LibEntry[] = []
+    for (const d of dirCandidates) {
+      if (await dirHasSupportedDocRecursive(d.path)) keptDirs.push(d)
+    }
+    keptDirs.sort((a, b) => a.name.localeCompare(b.name))
+    files.sort((a, b) => a.name.localeCompare(b.name))
+    return [...keptDirs, ...files]
   } catch (e) {
     showError('读取库目录失败', e)
     return []
@@ -1096,7 +1134,7 @@ async function renderLibraryRoot() {
   pathEl.textContent = root
   const top = document.createElement('div')
   top.className = 'lib-node lib-dir'
-  top.innerHTML = `<span class="lib-toggle">v</span><span class="lib-ico lib-ico-dir"></span><span class="lib-name">${root.split(/[\\/]+/).pop() || root}</span>`
+  top.innerHTML = `<span class="lib-toggle">v</span><svg class="lib-ico lib-ico-dir" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="lib-name">${root.split(/[\\/]+/).pop() || root}</span>`
   const children = document.createElement('div')
   children.className = 'lib-children'
   treeEl.appendChild(top)
@@ -1122,7 +1160,7 @@ async function renderDir(container: HTMLDivElement, dir: string) {
     if (e.isDir) {
       const row = document.createElement('div')
       row.className = 'lib-node lib-dir'
-      row.innerHTML = `<span class="lib-toggle">></span><span class="lib-ico lib-ico-dir"></span><span class="lib-name">${e.name}</span>`
+      row.innerHTML = `<span class="lib-toggle">></span><svg class="lib-ico lib-ico-dir" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><span class="lib-name">${e.name}</span>`
       const kids = document.createElement('div')
       kids.className = 'lib-children'
       kids.style.display = 'none'

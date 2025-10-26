@@ -9,6 +9,8 @@
   --fg: #1f2328;
   --muted: #7a7a7a;
   --border: #e5e7eb;
+  /* 侧栏/面板浅灰背景（亮色下略浅，暗色下略深） */
+  --panel-bg: #f7f8fa;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -17,6 +19,7 @@
     --fg: #e5e7eb;
     --muted: #9ca3af;
     --border: #1f2937;
+    --panel-bg: #0f1114;
   }
 }
 
@@ -98,9 +101,9 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 }
 
 /* 文档库侧栏（阶段A：最小侵入） */
-.library { position: absolute; inset: 0 auto 0 0; width: 280px; border-right: 1px solid var(--border); background: var(--bg); color: var(--fg); overflow: auto; z-index: 15; }
+.library { position: absolute; inset: 0 auto 0 0; width: 280px; border-right: 1px solid var(--border); background: var(--panel-bg); color: var(--fg); overflow: auto; z-index: 15; }
 .library.hidden { display: none; }
-.library .lib-header { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--border); padding: 8px 10px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.library .lib-header { position: sticky; top: 0; background: var(--panel-bg); border-bottom: 1px solid var(--border); padding: 8px 10px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .library .lib-path { flex: 1; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .library .lib-btn { -webkit-app-region: no-drag; cursor: pointer; border: 1px solid var(--border); background: rgba(127,127,127,0.08); color: var(--fg); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
 .library .lib-btn:hover { background: rgba(127,127,127,0.14); }
@@ -113,9 +116,9 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 .library .lib-children { margin-left: 14px; }
 
 /* 侧栏行内简易图标，避免 Emoji 字体兼容性问题 */
-.library .lib-ico { display: inline-block; vertical-align: middle; color: var(--muted); }
-.library .lib-ico-dir { position: relative; width: 14px; height: 10px; background: currentColor; border-radius: 2px; }
-.library .lib-ico-dir::before { content: ''; position: absolute; left: 1px; top: -3px; width: 6px; height: 3px; background: currentColor; border-radius: 2px 2px 0 0; }
+.library .lib-ico { display: inline-block; vertical-align: middle; width: 16px; height: 16px; fill: var(--muted); stroke: var(--muted); }
+.library .lib-node:hover .lib-ico { fill: var(--fg); stroke: var(--fg); }
+/* 保留文件图标的简易形状，后续可同样替换为 SVG */
 .library .lib-ico-file { position: relative; width: 10px; height: 12px; border: 1px solid currentColor; border-radius: 2px; box-sizing: border-box; }
 .library .lib-ico-file::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 4px solid transparent; border-bottom: 4px solid currentColor; }
 
