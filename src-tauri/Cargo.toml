@@ -17,7 +17,6 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-store = "2"
 tauri-plugin-window-state = "2"
-tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
 
 [profile.release]

@@ -260,6 +260,9 @@ const status = document.getElementById('status') as HTMLDivElement
 // 动态添加"最近文件"菜单项
 const menubar = document.querySelector('.menubar') as HTMLDivElement
 if (menubar) {
+  // 统一“打开”按钮文案
+  const btnOpen0 = document.getElementById('btn-open') as HTMLDivElement | null
+  if (btnOpen0) { btnOpen0.textContent = '\u6253\u5f00'; btnOpen0.title = '\u6253\u5f00 (Ctrl+O)' }
   const recentBtn = document.createElement('div')
   recentBtn.id = 'btn-recent'
   recentBtn.className = 'menu-item'
@@ -271,7 +274,13 @@ if (menubar) {
   libBtn.className = 'menu-item'
   libBtn.title = "\u6587\u6863\u5e93\u4fa7\u680f"
   libBtn.textContent = "\u5e93"
-  menubar.appendChild(libBtn)
+  // 将“库”按钮插入到“打开”按钮左侧（若获取不到则放到最左）
+  const openBtnRef = document.getElementById('btn-open') as HTMLDivElement | null
+  if (openBtnRef && openBtnRef.parentElement === menubar) {
+    menubar.insertBefore(libBtn, openBtnRef)
+  } else {
+    menubar.insertBefore(libBtn, menubar.firstChild)
+  }
   const aboutBtn = document.createElement('div')
   aboutBtn.id = 'btn-about'
   aboutBtn.className = 'menu-item'
