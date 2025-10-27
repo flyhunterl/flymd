@@ -1063,7 +1063,22 @@ async function openFile(preset?: string) {
 
 
     logInfo('���ļ�', { path: selectedPath })
-    const content = await readTextFile(selectedPath)
+    // 读取文件内容：优先使用 fs 插件；若因路径权限受限（forbidden path）则回退到自定义后端命令
+    let content: string
+    try {
+      content = await readTextFile(selectedPath as any)
+    } catch (e: any) {
+      const msg = (e && (e.message || e.toString?.())) ? String(e.message || e.toString()) : ''
+      if (/forbidden\s*path/i.test(msg) || /not\s*allowed/i.test(msg)) {
+        try {
+          content = await invoke<string>('read_text_file_any', { path: selectedPath })
+        } catch (e2) {
+          throw e2
+        }
+      } else {
+        throw e
+      }
+    }
     editor.value = content
     currentFilePath = selectedPath
     dirty = false
@@ -2394,7 +2409,6 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   return Promise.resolve()
 }
 // ========= END =========
-
 
 
 

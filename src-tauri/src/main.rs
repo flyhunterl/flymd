@@ -266,7 +266,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
@@ -305,6 +305,31 @@ fn main() {
 }
 
 #[tauri::command]
+async fn read_text_file_any(path: String) -> Result<String, String> {
+  use std::fs::File;
+  use std::io::Read;
+  use std::path::PathBuf;
+
+  let pathbuf = PathBuf::from(path);
+  if !pathbuf.exists() {
+    return Err("path not found".into());
+  }
+
+  // 后台线程读取，避免阻塞异步运行时
+  let res = tauri::async_runtime::spawn_blocking(move || {
+    let mut f = File::open(&pathbuf).map_err(|e| format!("open error: {e}"))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).map_err(|e| format!("read error: {e}"))?;
+    let s = String::from_utf8_lossy(&buf).to_string();
+    Ok::<String, String>(s)
+  })
+  .await
+  .map_err(|e| format!("join error: {e}"))?;
+
+  res
+}
+
+#[tauri::command]
 async fn move_to_trash(path: String) -> Result<(), String> {
   // 使用 trash crate 跨平台移动到回收站
   tauri::async_runtime::spawn_blocking(move || {
@@ -331,4 +356,3 @@ async fn force_remove_path(path: String) -> Result<(), String> {
   .map_err(|e| format!("join error: {e}"))??;
   Ok(())
 }
-
