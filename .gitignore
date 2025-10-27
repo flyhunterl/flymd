@@ -46,3 +46,7 @@ q.md
 .claude/
 DEBUG_PATCH_MARKER.txt
 next.md
+
+# Local perf plan (exclude)
+optimize.md
+
