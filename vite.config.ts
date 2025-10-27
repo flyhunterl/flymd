@@ -13,7 +13,7 @@ const DEV_CSP = [
   "form-action 'self'"
 ].join('; ')
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   base: './',
   resolve: {
     alias: {
@@ -25,8 +25,26 @@ export default defineConfig({
     port: 5173,
     strictPort: false
   },
+  // 生产构建：分包与剥离 console/debugger；开发：预打包重库
+  esbuild: mode === 'production' ? { drop: ['console', 'debugger'] } : {},
+  optimizeDeps: {
+    include: ['markdown-it', 'dompurify', 'highlight.js', 'mermaid', 'markdown-it-katex']
+  },
   build: {
     // 为了使用动态 import 和顶层 await
-    target: 'es2022'
+    target: 'es2022',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('markdown-it')) return 'markdown-it'
+            if (id.includes('dompurify')) return 'dompurify'
+            if (id.includes('highlight')) return 'highlightjs'
+            if (id.includes('mermaid')) return 'mermaid'
+          }
+        }
+      }
+    },
+    minify: 'esbuild'
   }
-})
+}))

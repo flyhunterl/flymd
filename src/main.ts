@@ -7,11 +7,10 @@
 */
 
 import './style.css'
-// 引入 KaTeX 样式，用于公式渲染
-import 'katex/dist/katex.min.css'
+// KaTeX 样式改为按需动态加载（首次检测到公式时再加载）
 
-import MarkdownIt from 'markdown-it'
-import DOMPurify from 'dompurify'
+// markdown-it 和 DOMPurify 改为按需动态 import，类型仅在编译期引用
+import type MarkdownIt from 'markdown-it'
 
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
@@ -37,6 +36,8 @@ const RECENT_MAX = 5
 
 // 渲染器（延迟初始化，首次进入预览时创建）
 let md: MarkdownIt | null = null
+let sanitizeHtml: ((html: string, cfg?: any) => string) | null = null
+let katexCssLoaded = false
 let hljsLoaded = false
 let mermaidReady = false
 
@@ -268,6 +269,7 @@ app.innerHTML = `
     <div class="statusbar" id="status">行 1, 列 1</div>
   </div>
 `
+try { logInfo('打点:DOM就绪') } catch {}
 
 const editor = document.getElementById('editor') as HTMLTextAreaElement
 const preview = document.getElementById('preview') as HTMLDivElement
@@ -654,10 +656,13 @@ async function initStore() {
 async function ensureRenderer() {
   if (md) return
   if (!hljsLoaded) {
-    // 按需加载 highlight.js
-    const hljs = await import('highlight.js')
+    // 按需加载 markdown-it 与 highlight.js
+    const [{ default: MarkdownItCtor }, hljs] = await Promise.all([
+      import('markdown-it'),
+      import('highlight.js')
+    ])
     hljsLoaded = true
-    md = new MarkdownIt({
+    md = new MarkdownItCtor({
       html: true,
       linkify: true,
       highlight(code, lang) {
@@ -689,13 +694,33 @@ async function ensureRenderer() {
 // 渲染预览（带安全消毒）
 async function renderPreview() {
   console.log('=== 开始渲染预览 ===')
+  // 首次预览开始打点
+  try { if (!(renderPreview as any)._firstLogged) { (renderPreview as any)._firstLogged = true; logInfo('打点:首次预览开始') } } catch {}
   await ensureRenderer()
   const raw = editor.value
   const html = md!.render(raw)
+  // 按需加载 KaTeX 样式：检测渲染结果是否包含 katex 片段
+  try {
+    if (!katexCssLoaded && /katex/.test(html)) {
+      await import('katex/dist/katex.min.css')
+      katexCssLoaded = true
+    }
+  } catch {}
   console.log('Markdown 渲染后的 HTML 片段:', html.substring(0, 500))
 
   // 配置 DOMPurify 允许 SVG 和 MathML
-  const safe = DOMPurify.sanitize(html, {
+  if (!sanitizeHtml) {
+    try {
+      const mod: any = await import('dompurify')
+      const DOMPurify = mod?.default || mod
+      sanitizeHtml = (h: string, cfg?: any) => DOMPurify.sanitize(h, cfg)
+    } catch (e) {
+      console.error('加载 DOMPurify 失败', e)
+      // 最保守回退：不消毒直接渲染（仅调试时），生产不应触达此分支
+      sanitizeHtml = (h: string) => h
+    }
+  }
+  const safe = sanitizeHtml!(html, {
     // 允许基础 SVG/Math 相关标签
     ADD_TAGS: ['svg', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'g', 'text', 'tspan', 'defs', 'marker', 'use', 'clipPath', 'mask', 'pattern', 'foreignObject'],
     ADD_ATTR: ['viewBox', 'xmlns', 'fill', 'stroke', 'stroke-width', 'd', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'transform', 'class', 'id', 'style', 'points', 'preserveAspectRatio', 'markerWidth', 'markerHeight', 'refX', 'refY', 'orient', 'markerUnits', 'fill-opacity', 'stroke-dasharray'],
@@ -943,7 +968,10 @@ async function renderPreview() {
       pre.setAttribute('data-codebox', '1')
     }
   } catch {}
-  }
+
+  // 首次预览完成打点
+  try { if (!(renderPreview as any)._firstDone) { (renderPreview as any)._firstDone = true; logInfo('打点:首次预览完成') } } catch {}
+}
 }
 
 // 拖拽支持：
@@ -1885,6 +1913,18 @@ function bindEvents() {
   
   // 快捷键：插入链接、重命名、删除（库树）
   document.addEventListener('keydown', guard(async (e: KeyboardEvent) => {
+    // 开发模式：F12 / Ctrl+Shift+I 打开 DevTools（不影响生产）
+    try {
+      if ((import.meta as any).env?.DEV) {
+        const isF12 = e.key === 'F12'
+        const isCtrlShiftI = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'i'
+        if (isF12 || isCtrlShiftI) {
+          e.preventDefault()
+          try { getCurrentWebview().openDevtools() } catch {}
+          return
+        }
+      }
+    } catch {}
     // 编辑快捷键（全局）：插入链接 / 加粗 / 斜体
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); guard(insertLink)(); return }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') { e.preventDefault(); await toggleMode(); return }
@@ -2299,22 +2339,19 @@ function bindEvents() {
 (async () => {
   try {
     console.log('flyMD (飞速MarkDown) 应用启动...')
+    try { logInfo('打点:JS启动') } catch {}
 
     // 尝试初始化存储（失败不影响启动）
     await initStore()
 
-    // 开发模式：自动打开 Devtools 便于采集日志
-    try {
-      // import.meta.env.DEV 在 Vite/Tauri dev 下为 true
-      if ((import.meta as any).env?.DEV) {
-        try { getCurrentWebview().openDevtools() } catch {}
-      }
-    } catch {}
+    // 开发模式：不再自动打开 DevTools，改为快捷键触发，避免干扰首屏
+    // 快捷键见下方全局 keydown（F12 或 Ctrl+Shift+I）
 
     // 核心功能：必须执行
     refreshTitle()
     refreshStatus()
     bindEvents()  // 🔧 关键：无论存储是否成功，都要绑定事件
+    try { logInfo('打点:事件绑定完成') } catch {}
 
     // 尝试加载最近文件（可能失败）
     try {
@@ -2323,7 +2360,20 @@ function bindEvents() {
       console.warn('最近文件面板加载失败:', e)
     }
 
-    setTimeout(() => editor.focus(), 0)
+    setTimeout(() => { try { editor.focus() } catch {}; try { logInfo('打点:可输入') } catch {} }, 0)
+    // 可交互后预热常用动态模块（不阻塞首屏）
+    try {
+      const ric: any = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 200))
+      ric(async () => {
+        try {
+          await Promise.allSettled([
+            import('markdown-it'),
+            import('dompurify'),
+            import('highlight.js'),
+          ])
+        } catch {}
+      })
+    } catch {}
     console.log('应用初始化完成')
     void logInfo('flyMD (飞速MarkDown) 应用初始化完成')
   } catch (error) {
@@ -2409,11 +2459,6 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   return Promise.resolve()
 }
 // ========= END =========
-
-
-
-
-
 
 
 
