@@ -1168,12 +1168,40 @@ async function openFile2(preset?: unknown) {
 
     const selected = (typeof preset === 'string')
       ? preset
-      : (await open({ multiple: false, filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }] }))
+      : (await open({ multiple: false, filters: [
+        { name: 'Markdown', extensions: ['md', 'markdown', 'txt'] },
+        { name: 'PDF', extensions: ['pdf'] },
+      ] }))
     if (!selected || Array.isArray(selected)) return
 
     const selectedPath = normalizePath(selected)
     logDebug('openFile2.selected', { typeof: typeof selected, selected })
     logDebug('openFile2.normalizedPath', { typeof: typeof selectedPath, selectedPath })
+
+    // PDF 预览分支：在读取文本前拦截处理
+    try {
+      const ext = (selectedPath.split(/\./).pop() || '').toLowerCase()
+      if (ext === 'pdf') {
+        currentFilePath = selectedPath as any
+        dirty = false
+        refreshTitle()
+        try { (editor as HTMLTextAreaElement).value = '' } catch {}
+        // 首选 convertFileSrc 以便 WebView 内置 PDF 查看器接管
+        let srcUrl: string = typeof convertFileSrc === 'function' ? convertFileSrc(selectedPath) : (selectedPath as any)
+        preview.innerHTML = `
+          <div class="pdf-preview" style="width:100%;height:100%;">
+            <iframe src="${srcUrl}" title="PDF 预览" style="width:100%;height:100%;border:0;" allow="fullscreen"></iframe>
+          </div>
+        `
+        mode = 'preview'
+        try { preview.classList.remove('hidden') } catch {}
+        try { syncToggleButton() } catch {}
+        await pushRecent(currentFilePath)
+        await renderRecentPanel(false)
+        logInfo('PDF 预览就绪', { path: selectedPath })
+        return
+      }
+    } catch {}
 
     // 读取文件内容：优先使用 fs 插件；若因路径权限受限（forbidden path / not allowed）回退到后端命令
     let content: string
