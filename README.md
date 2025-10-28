@@ -3,7 +3,7 @@
 
 > 多平台 专注写作 极致简洁 即开即用
 
-[![Version](https://img.shields.io/badge/version-0.0.4-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-0.0.5-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -89,7 +89,7 @@
 ### 安装使用（推荐）
 
 1. 前往 [Releases](https://github.com/flyhunterl/flymd/releases) 下载最新版本
-2. 运行 `flymd_0.0.4_x64_setup.exe` 安装（文件名以实际发布为准）
+2. 运行 `flymd_0.0.5_x64_setup.exe` 安装（文件名以实际发布为准）
 3. 启动 flyMD，开始使用
 
 ## ⌨️ 快捷键
