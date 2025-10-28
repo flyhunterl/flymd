@@ -11,6 +11,8 @@
   --border: #e5e7eb;
   /* 侧栏/面板浅灰背景（亮色下略浅，暗色下略深） */
   --panel-bg: #f3f4f6;
+  /* 所见模式背景（与普通模式区分） */
+  --wysiwyg-bg: #f6f8fb;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,6 +22,8 @@
     --muted: #9ca3af;
     --border: #1f2937;
     --panel-bg: #0e1217;
+    /* 深色所见模式背景（略浅以区分） */
+    --wysiwyg-bg: #0f1319;
   }
 }
 
@@ -77,6 +81,8 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 }
 
 .container { height: calc(100% - 32px); position: relative; }
+/* 所见模式：整体容器背景替换为专用色 */
+.container.wysiwyg { background: var(--wysiwyg-bg); }
 
 .editor {
   width: 100%; height: 100%;
@@ -93,6 +99,166 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
   background: var(--bg); color: var(--fg);
 }
 .preview.hidden { display: none; }
+
+/* 所见模式覆盖：即使预览带有 hidden 类，也强制显示 */
+.container.wysiwyg .preview.hidden { display: block; }
+
+/* 所见模式：预览在下，编辑器在上（透明文字，仅显示光标） */
+.container.wysiwyg .preview {
+  z-index: 1;
+  opacity: 1;
+  pointer-events: none; /* 不拦截点击，V1 仅显示 */
+  /* 与编辑器对齐（避免文字看起来在光标“下面”） */
+  padding: 14px 16px 40px 16px; /* 与 .editor 一致 */
+  /* 使用与编辑器完全一致的等宽字体，保证 ch 宽度一致 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 14px; /* 与 .editor 一致 */
+  /* 微调变量（如需细调可在运行时动态注入样式覆盖） */
+  --w-nudge-x: 0.5ch;   /* 标题横向整体微调，默认约半个西文字符 */
+  --w-head-top: -0.10em;/* 标题纵向上移，缓解“在下方”感受 */
+}
+.container.wysiwyg .editor {
+  position: relative;
+  z-index: 2;
+  background: transparent;
+  color: transparent;          /* 隐藏文本 */
+  caret-color: var(--fg);      /* 仍显示光标 */
+  /* 使用与常规编辑相同的等宽字体，确保字符宽度匹配 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  line-height: 1.6;            /* 与预览一致 */
+}
+
+/* 可选：所见模式隐藏光标，结合“高亮当前行”使用 */
+/* 所见模式：显式要求隐藏系统插入符（取消光标） */
+.container.wysiwyg.no-caret .editor { caret-color: transparent !important; }
+/* 同时禁用自定义覆盖光标 */
+.container.wysiwyg.no-caret .wysiwyg-caret { display: none !important; }
+
+/* 所见模式：高亮当前编辑的逻辑行（整页宽，指示当前位置） */
+.container.wysiwyg .wysiwyg-line {
+  position: absolute; left: 0; right: 0; height: 1.6em;
+  background: rgba(127,127,127,0.12);
+  z-index: 2; pointer-events: none;
+  display: none;
+}
+.container.wysiwyg .wysiwyg-line.show { display: block; }
+
+/* 所见模式：点状光标（替代竖线光标） */
+.container.wysiwyg .wysiwyg-caret {
+  position: absolute; z-index: 3; pointer-events: none;
+  /* 采用“终端式”下划线光标：宽度等于 1 个字符宽，厚度很薄 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  width: 1ch; height: 2px; border-radius: 1px;
+  background: var(--fg);
+  /* 以 left 顶边为锚点，不再居中偏移 */
+  transform: none;
+  display: none;
+}
+.container.wysiwyg .wysiwyg-caret.show { display: block; }
+/* 光标闪烁动画（所见模式） */
+@keyframes caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.container.wysiwyg .wysiwyg-caret.show {
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .container.wysiwyg .wysiwyg-caret.show { animation: none; }
+}
+/* 注入到预览中的点状“光标”样式 */
+.container.wysiwyg .preview .caret-dot {
+  color: var(--fg);
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
+/* 取消预览正文的居中与段落外边距，使与 textarea 行基线更贴合 */
+.container.wysiwyg .preview-body { max-width: none; margin: 0; }
+.container.wysiwyg .preview p { margin: 0; }
+/* 使段落/标题换行行为更贴近 textarea */
+.container.wysiwyg .preview p,
+.container.wysiwyg .preview h1,
+.container.wysiwyg .preview h2,
+.container.wysiwyg .preview h3,
+.container.wysiwyg .preview h4,
+.container.wysiwyg .preview h5,
+.container.wysiwyg .preview h6 { white-space: pre-wrap; word-break: break-word; }
+/* 所见模式：代码块与编辑器严格对齐 */
+.container.wysiwyg .preview pre {
+  margin-top: 0; margin-bottom: 0;
+  padding-top: 0; padding-bottom: 0;
+  line-height: 1.6; /* 与 .editor 相同 */
+}
+.container.wysiwyg .preview pre code {
+  font-size: 14px; /* 与 .editor 相同 */
+  line-height: 1.6;
+}
+
+/* 标题在所见模式下的对齐优化：
+   - 移除上下外边距，避免块级顶部下坠
+   - 统一行高到与编辑器一致
+   - 使用 text-indent + padding-left 抵消 Markdown 源中 "# " 前缀在横向上的差异
+*/
+.container.wysiwyg .preview h1,
+.container.wysiwyg .preview h2,
+.container.wysiwyg .preview h3,
+.container.wysiwyg .preview h4,
+.container.wysiwyg .preview h5,
+.container.wysiwyg .preview h6 {
+  margin: 0;
+  line-height: 1.6;        /* 使用与编辑器一致的行高（单位less）*/
+  position: relative;
+  top: var(--w-head-top);
+  font-size: 1em;          /* 基准字体大小与编辑器一致 */
+  font-weight: 700;        /* 保留“标题感” */
+  display: block;          /* 块级，避免多个标题同排显示 */
+  transform-origin: left top;
+}
+
+/* 标题放大采用 transform，不改变行框高度，从而与输入光标保持一致。
+   同时将左侧缩进按比例缩放前反向抵消，保证“# ”被移除后起点对齐。*/
+.container.wysiwyg .preview h1 {
+  --hscale: 1.60;
+  transform: scale(var(--hscale));
+  text-indent: calc((-2ch - var(--w-nudge-x)) / var(--hscale));
+  padding-left: calc((2ch + var(--w-nudge-x)) / var(--hscale));
+  padding-bottom: 0.60em; /* 为放大后的视觉高度预留空间，避免压住下一行 */
+}
+.container.wysiwyg .preview h2 {
+  --hscale: 1.40;
+  transform: scale(var(--hscale));
+  text-indent: calc((-3ch - var(--w-nudge-x)) / var(--hscale));
+  padding-left: calc((3ch + var(--w-nudge-x)) / var(--hscale));
+  padding-bottom: 0.45em;
+}
+.container.wysiwyg .preview h3 {
+  --hscale: 1.20;
+  transform: scale(var(--hscale));
+  text-indent: calc((-4ch - var(--w-nudge-x)) / var(--hscale));
+  padding-left: calc((4ch + var(--w-nudge-x)) / var(--hscale));
+  padding-bottom: 0.30em;
+}
+.container.wysiwyg .preview h4 {
+  --hscale: 1.10;
+  transform: scale(var(--hscale));
+  text-indent: calc((-5ch - var(--w-nudge-x)) / var(--hscale));
+  padding-left: calc((5ch + var(--w-nudge-x)) / var(--hscale));
+  padding-bottom: 0.20em;
+}
+.container.wysiwyg .preview h5 {
+  --hscale: 1.00;
+  transform: scale(var(--hscale));
+  text-indent: calc((-6ch - var(--w-nudge-x)) / var(--hscale));
+  padding-left: calc((6ch + var(--w-nudge-x)) / var(--hscale));
+  padding-bottom: 0.10em;
+}
+.container.wysiwyg .preview h6 {
+  --hscale: 1.00;
+  transform: scale(var(--hscale));
+  text-indent: calc((-7ch - var(--w-nudge-x)) / var(--hscale));
+  padding-left: calc((7ch + var(--w-nudge-x)) / var(--hscale));
+  padding-bottom: 0.10em;
+}
 
 /* 预览正文容器：定宽居中，类似 Typora/Word 的阅读宽度 */
 .preview-body {
@@ -343,3 +509,5 @@ html, body { overflow: hidden; }
 #ft-modal { font-size: 13px; }
 #ft-modal .ft-box button { cursor: pointer; }
 
+/* 所见模式：覆盖预览背景为专用色 */
+.container.wysiwyg .preview { background: var(--wysiwyg-bg); }

@@ -44,6 +44,38 @@ let mermaidReady = false
 // 应用状态
 let fileTreeReady = false
 let mode: Mode = 'edit'
+// 所见即所得开关（Overlay 模式）
+let wysiwyg = false
+let _wysiwygRaf = 0
+// 仅在按回车时触发渲染（可选开关，默认关闭）
+let wysiwygEnterToRenderOnly = false
+// 当前行高亮元素
+let wysiwygLineEl: HTMLDivElement | null = null
+// 点状光标元素与度量缓存
+let wysiwygCaretEl: HTMLDivElement | null = null
+let _caretCharWidth = 0
+let _caretFontKey = ''
+// 点状“光标”闪烁控制（仅所见模式预览中的点）
+let _dotBlinkTimer: number | null = null
+let _dotBlinkOn = true
+
+function startDotBlink() {
+  try {
+    if (_dotBlinkTimer != null) return
+    _dotBlinkOn = true
+    _dotBlinkTimer = window.setInterval(() => {
+      _dotBlinkOn = !_dotBlinkOn
+      // 闪烁由 CSS 动画驱动；此计时器仅用于保持状态，可按需扩展
+    }, 800)
+  } catch {}
+}
+
+function stopDotBlink() {
+  try {
+    if (_dotBlinkTimer != null) { clearInterval(_dotBlinkTimer); _dotBlinkTimer = null }
+    _dotBlinkOn = false
+  } catch {}
+}
 // 库侧栏选中状态
 let selectedFolderPath: string | null = null
 let selectedNodeEl: HTMLElement | null = null
@@ -294,6 +326,136 @@ const preview = document.getElementById('preview') as HTMLDivElement
 const filenameLabel = document.getElementById('filename') as HTMLDivElement
 const status = document.getElementById('status') as HTMLDivElement
 
+// 所见模式：输入即渲染 + 覆盖式同窗显示
+function syncScrollEditorToPreview() {
+  try {
+    if (!wysiwyg) return
+    const er = editor.scrollHeight - editor.clientHeight
+    const pr = preview.scrollHeight - preview.clientHeight
+    const ratio = er > 0 ? (editor.scrollTop / er) : 0
+    const dest = Math.max(0, Math.round(ratio * Math.max(0, pr)))
+    if (!Number.isNaN(dest)) preview.scrollTop = dest
+    updateWysiwygLineHighlight()
+  } catch {}
+}
+
+function scheduleWysiwygRender() {
+  try {
+    if (!wysiwyg) return
+    if (wysiwygEnterToRenderOnly) { updateWysiwygLineHighlight(); return }
+    if (_wysiwygRaf) cancelAnimationFrame(_wysiwygRaf)
+    _wysiwygRaf = requestAnimationFrame(async () => {
+      try { await renderPreview() } catch {}
+      syncScrollEditorToPreview()
+      updateWysiwygCaretDot()
+    })
+  } catch {}
+}
+
+async function setWysiwygEnabled(enable: boolean) {
+  try {
+    if (wysiwyg === enable) return
+    wysiwyg = enable
+    const container = document.querySelector('.container') as HTMLDivElement | null
+    if (container) container.classList.toggle('wysiwyg', wysiwyg)
+  if (wysiwyg) {
+      // 使用点状光标替代系统竖线光标
+      try { if (container) container.classList.add('no-caret') } catch {}
+      try { preview.classList.remove('hidden') } catch {}
+      await renderPreview()
+      syncScrollEditorToPreview()
+      updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink()
+    } else {
+      if (mode !== 'preview') {
+        try { preview.classList.add('hidden') } catch {}
+      }
+      try { if (container) container.classList.remove('no-caret') } catch {}
+      if (wysiwygLineEl) wysiwygLineEl.classList.remove('show')
+      if (wysiwygCaretEl) wysiwygCaretEl.classList.remove('show')
+      stopDotBlink()
+    }
+    // 更新按钮提示
+    try {
+      const b = document.getElementById('btn-wysiwyg') as HTMLDivElement | null
+      if (b) b.title = (wysiwyg ? '\u9000\u51fa' : '\u5f00\u542f') + '\u6240\u89c1\u6a21\u5f0f (Ctrl+Shift+E)\n' + (wysiwygEnterToRenderOnly ? '\u5f53\u524d: \u56de\u8f66\u518d\u6e32\u67d3 (Ctrl+Shift+R \u5207\u6362)' : '\u5f53\u524d: \u5373\u65f6\u6e32\u67d3 (Ctrl+Shift+R \u5207\u6362)')
+    } catch {}
+  } catch {}
+}
+
+async function toggleWysiwyg() {
+  await setWysiwygEnabled(!wysiwyg)
+}
+
+function updateWysiwygLineHighlight() {
+  try {
+    if (!wysiwyg || !wysiwygLineEl) return
+    const st = editor.selectionStart >>> 0
+    const before = editor.value.slice(0, st)
+    const lineIdx = before.split('\n').length - 1
+    const style = window.getComputedStyle(editor)
+    let lh = parseFloat(style.lineHeight || '')
+    if (!lh || Number.isNaN(lh)) {
+      const fs = parseFloat(style.fontSize || '14') || 14
+      lh = fs * 1.6
+    }
+    const padTop = parseFloat(style.paddingTop || '0') || 0
+    const top = Math.max(0, Math.round(padTop + lineIdx * lh - editor.scrollTop))
+    wysiwygLineEl.style.top = `${top}px`
+    wysiwygLineEl.style.height = `${lh}px`
+    // 不再显示高亮行，只更新位置（如需恢复，改为添加 show 类）
+  } catch {}
+}
+
+function measureCharWidth(): number {
+  try {
+    const style = window.getComputedStyle(editor)
+    const font = `${style.fontStyle} ${style.fontVariant} ${style.fontWeight} ${style.fontSize} / ${style.lineHeight} ${style.fontFamily}`
+    if (_caretCharWidth > 0 && _caretFontKey === font) return _caretCharWidth
+    const canvas = (measureCharWidth as any)._c || document.createElement('canvas')
+    ;(measureCharWidth as any)._c = canvas
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return _caretCharWidth || 8
+    ctx.font = font
+    // 使用 '0' 作为等宽参考字符
+    const w = ctx.measureText('0').width
+    if (w && w > 0) { _caretCharWidth = w; _caretFontKey = font }
+    return _caretCharWidth || 8
+  } catch { return _caretCharWidth || 8 }
+}
+
+function updateWysiwygCaretDot() {
+  try {
+    if (!wysiwyg || !wysiwygCaretEl) return
+    // 方案A：使用原生系统光标，禁用自定义覆盖光标
+    try { wysiwygCaretEl.classList.remove('show') } catch {}
+    return
+    const st = editor.selectionStart >>> 0
+    const before = editor.value.slice(0, st)
+    const style = window.getComputedStyle(editor)
+    // 行高
+    let lh = parseFloat(style.lineHeight || '')
+    if (!lh || Number.isNaN(lh)) { const fs = parseFloat(style.fontSize || '14') || 14; lh = fs * 1.6 }
+    const padTop = parseFloat(style.paddingTop || '0') || 0
+    const padLeft = parseFloat(style.paddingLeft || '0') || 0
+    // 计算当前行与列
+    const lastNl = before.lastIndexOf('\n')
+    const colStr = lastNl >= 0 ? before.slice(lastNl + 1) : before
+    const lineIdx = before.split('\n').length - 1
+    // 制表符按 4 个空格估算
+    const tab4 = (s: string) => s.replace(/\t/g, '    ')
+    const colLen = tab4(colStr).length
+    const ch = measureCharWidth()
+    const top = Math.max(0, Math.round(padTop + lineIdx * lh - editor.scrollTop))
+    const left = Math.max(0, Math.round(padLeft + colLen * ch - editor.scrollLeft))
+    // 将光标放在当前行底部，并略微向下微调
+    const caretH = (() => { try { return parseFloat(window.getComputedStyle(wysiwygCaretEl).height || '2') || 2 } catch { return 2 } })()
+    const baseNudge = 1 // 像素级微调，使光标更贴近底部
+    wysiwygCaretEl.style.top = `${Math.max(0, Math.round(top + lh - caretH + baseNudge))}px`
+    wysiwygCaretEl.style.left = `${left}px`
+    wysiwygCaretEl.classList.add('show')
+  } catch {}
+}
+
 // 动态添加"最近文件"菜单项
 const menubar = document.querySelector('.menubar') as HTMLDivElement
 if (menubar) {
@@ -311,7 +473,13 @@ if (menubar) {
   uplBtn.className = 'menu-item'
   uplBtn.title = '图床设置'
   uplBtn.textContent = '\u56fe\u5e8a'
-  menubar.appendChild(uplBtn)
+      menubar.appendChild(uplBtn)
+      // 所见模式按钮（放在“关于”左侧）
+      const wBtn = document.createElement('div')
+      wBtn.id = 'btn-wysiwyg'
+      wBtn.className = 'menu-item'
+      wBtn.title = '\u6240\u89c1\u6a21\u5f0f (Ctrl+Shift+E)'
+      wBtn.textContent = '\u6240\u89c1'
   const libBtn = document.createElement('div')
   libBtn.id = 'btn-library'
   libBtn.className = 'menu-item'
@@ -328,11 +496,23 @@ if (menubar) {
   aboutBtn.id = 'btn-about'
   aboutBtn.className = 'menu-item'
   aboutBtn.title = '关于'
-  aboutBtn.textContent = '\u5173\u4e8e'
-  menubar.appendChild(aboutBtn)
+      aboutBtn.textContent = '\u5173\u4e8e'
+      menubar.appendChild(wBtn)
+      menubar.appendChild(aboutBtn)
 }
 const containerEl = document.querySelector('.container') as HTMLDivElement
   if (containerEl) {
+  // 所见模式：当前行高亮覆盖层
+  try {
+    wysiwygLineEl = document.createElement('div') as HTMLDivElement
+    wysiwygLineEl.id = 'wysiwyg-line'
+    wysiwygLineEl.className = 'wysiwyg-line'
+    containerEl.appendChild(wysiwygLineEl)
+    wysiwygCaretEl = document.createElement('div') as HTMLDivElement
+    wysiwygCaretEl.id = 'wysiwyg-caret'
+    wysiwygCaretEl.className = 'wysiwyg-caret'
+    containerEl.appendChild(wysiwygCaretEl)
+  } catch {}
   const panel = document.createElement('div')
   panel.id = 'recent-panel'
   panel.className = 'recent-panel hidden'
@@ -715,7 +895,59 @@ async function renderPreview() {
   // 首次预览开始打点
   try { if (!(renderPreview as any)._firstLogged) { (renderPreview as any)._firstLogged = true; logInfo('打点:首次预览开始') } } catch {}
   await ensureRenderer()
-  const raw = editor.value
+  let raw = editor.value
+  // 所见模式：用一个“.”标记插入点，优先不破坏 Markdown 结构
+  try {
+    if (wysiwyg) {
+      const st = editor.selectionStart >>> 0
+      const before = raw.slice(0, st)
+      const after = raw.slice(st)
+      const lineStart = before.lastIndexOf('\n') + 1
+      const curLine = before.slice(lineStart)
+      const fenceRE = /^ {0,3}(```+|~~~+)/
+      // 计算在光标之前是否处于围栏代码块内
+      const preText = raw.slice(0, lineStart)
+      const preLines = preText.split('\n')
+      let insideFence = false
+      let fenceCh = ''
+      for (const ln of preLines) {
+        const m = ln.match(fenceRE)
+        if (m) {
+          const ch = m[1][0]
+          if (!insideFence) { insideFence = true; fenceCh = ch }
+          else if (ch === fenceCh) { insideFence = false; fenceCh = '' }
+        }
+      }
+      const isFenceLine = fenceRE.test(curLine)
+      let injectAt = st
+      // 行首：将点放在不破坏语法的前缀之后
+      if (st === lineStart) {
+        const mBQ = curLine.match(/^ {0,3}> ?/)
+        const mH = curLine.match(/^ {0,3}#{1,6} +/)
+        const mUL = curLine.match(/^ {0,3}[-*+] +/)
+        const mOL = curLine.match(/^ {0,3}\d+\. +/)
+        const prefixLen = (mBQ?.[0]?.length || mH?.[0]?.length || mUL?.[0]?.length || mOL?.[0]?.length || 0)
+        if (prefixLen > 0) injectAt = lineStart + prefixLen
+      }
+      // 围栏行：开围栏行→围栏符之后；关围栏行→跳过
+      if (isFenceLine) {
+        const m = curLine.match(fenceRE)
+        if (m) {
+          const ch = m[1][0]
+          if (!insideFence) {
+            injectAt = lineStart + m[0].length
+          } else if (ch === fenceCh) {
+            injectAt = -1
+          }
+        }
+      }
+      if (injectAt >= 0) {
+        // 使用下划线 '_' 作为可见“光标”；代码块中用纯 '_'，其他位置用 span 包裹以实现闪烁
+        const dotStr = insideFence && !isFenceLine ? '_' : '<span class="caret-dot">_</span>'
+        raw = raw.slice(0, injectAt) + dotStr + raw.slice(injectAt)
+      }
+    }
+  } catch {}
   const html = md!.render(raw)
   // 按需加载 KaTeX 样式：检测渲染结果是否包含 katex 片段
   try {
@@ -1074,7 +1306,7 @@ async function toggleMode() {
     await renderPreview()
     preview.classList.remove('hidden')
   } else {
-    preview.classList.add('hidden')
+    if (!wysiwyg) preview.classList.add('hidden')
     editor.focus()
   }
   ;(document.getElementById('btn-toggle') as HTMLButtonElement).textContent = mode === 'edit' ? '预览' : '编辑'
@@ -1335,6 +1567,8 @@ async function newFile() {
   refreshStatus()
   if (mode === 'preview') {
     await renderPreview()
+  } else if (wysiwyg) {
+    scheduleWysiwygRender()
   }
 }
 
@@ -1400,6 +1634,12 @@ function syncToggleButton() {
 
 // 打开文件后强制切换为预览模式
 async function switchToPreviewAfterOpen() {
+  if (wysiwyg) {
+    try { await renderPreview() } catch (e) { try { showError('Ԥ����Ⱦʧ��', e) } catch {} }
+    try { preview.classList.remove('hidden') } catch {}
+    try { syncToggleButton() } catch {}
+    return
+  }
   mode = 'preview'
   try { await renderPreview() } catch (e) { try { showError('预览渲染失败', e) } catch {} }
   try { preview.classList.remove('hidden') } catch {}
@@ -1883,11 +2123,13 @@ function bindEvents() {
   const btnLibrary = document.getElementById('btn-library')
   const btnAbout = document.getElementById('btn-about')
   const btnUploader = document.getElementById('btn-uploader')
+  const btnWysiwyg = document.getElementById('btn-wysiwyg')
 
   if (btnOpen) btnOpen.addEventListener('click', guard(() => openFile2()))
   if (btnSave) btnSave.addEventListener('click', guard(() => saveFile()))
   if (btnSaveas) btnSaveas.addEventListener('click', guard(() => saveAs()))
   if (btnToggle) btnToggle.addEventListener('click', guard(() => toggleMode()))
+  if (btnWysiwyg) btnWysiwyg.addEventListener('click', guard(() => toggleWysiwyg()))
   // 代码复制按钮（事件委托）
   // 库侧栏右键菜单
   document.addEventListener('contextmenu', (ev) => {
@@ -2003,9 +2245,11 @@ function bindEvents() {
     } catch {}
     // 编辑快捷键（全局）：插入链接 / 加粗 / 斜体
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); guard(insertLink)(); return }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'e') { e.preventDefault(); await toggleWysiwyg(); return }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); wysiwygEnterToRenderOnly = !wysiwygEnterToRenderOnly; try { const b = document.getElementById('btn-wysiwyg') as HTMLDivElement | null; if (b) b.title = (wysiwyg ? '\u6240\u89c1\u6a21\u5f0f' : '') + (wysiwygEnterToRenderOnly ? ' - \u56de\u8f66\u518d\u6e32\u67d3' : ' - \u5373\u65f6\u6e32\u67d3') + ' (Ctrl+Shift+E)'; } catch {}; return }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') { e.preventDefault(); await toggleMode(); return }
-    if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); guard(formatBold)(); if (mode === 'preview') void renderPreview(); return }
-    if (e.ctrlKey && e.key.toLowerCase() === 'i') { e.preventDefault(); guard(formatItalic)(); if (mode === 'preview') void renderPreview(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); guard(formatBold)(); if (mode === 'preview') void renderPreview(); else if (wysiwyg) scheduleWysiwygRender(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'i') { e.preventDefault(); guard(formatItalic)(); if (mode === 'preview') void renderPreview(); else if (wysiwyg) scheduleWysiwygRender(); return }
     // 文件操作快捷键
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); await openFile2(); return }
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); await saveAs(); return }
@@ -2090,6 +2334,13 @@ function bindEvents() {
   if (btnAbout) btnAbout.addEventListener('click', guard(() => showAbout(true)))
   if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
 
+  // 所见模式：输入/合成结束/滚动时联动渲染与同步
+  editor.addEventListener('input', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } })
+  editor.addEventListener('compositionend', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } })
+  editor.addEventListener('scroll', () => { if (wysiwyg) { syncScrollEditorToPreview(); updateWysiwygCaretDot() } })
+  editor.addEventListener('keyup', (e) => { if (wysiwyg) { if (wysiwygEnterToRenderOnly && e.key === 'Enter') scheduleWysiwygRender(); else void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } })
+  editor.addEventListener('click', () => { if (wysiwyg) { void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } })
+
   // 绑定全局点击（图床弹窗测试按钮）
   document.addEventListener('click', async (ev) => {
     const t = ev?.target as HTMLElement
@@ -2157,6 +2408,8 @@ function bindEvents() {
           const pub = await uploadImageToS3R2(file, fname, file.type || 'application/octet-stream', upCfg)
           insertAtCursor(`![${fname}](${pub.publicUrl})`)
           if (mode === 'preview') await renderPreview()
+          else if (wysiwyg) scheduleWysiwygRender()
+          else if (wysiwyg) scheduleWysiwygRender()
           return
         }
       } catch (e) {
@@ -2199,6 +2452,7 @@ function bindEvents() {
                 refreshTitle()
                 refreshStatus()
                 if (mode === 'preview') await renderPreview()
+                else if (wysiwyg) scheduleWysiwygRender()
                 // 拖入 MD 文件后默认预览
                 await switchToPreviewAfterOpen()
               }
@@ -2228,6 +2482,7 @@ function bindEvents() {
             if (partsUpload.length > 0) {
               insertAtCursor(partsUpload.join('\n'))
               if (mode === 'preview') await renderPreview()
+              else if (wysiwyg) scheduleWysiwygRender()
               return
             }
           }
@@ -2253,6 +2508,7 @@ function bindEvents() {
         const isImg = extIsImage(cand)
         insertAtCursor(`${isImg ? '!' : ''}[${isImg ? 'image' : 'link'}](${cand})`)
         if (mode === 'preview') await renderPreview()
+        else if (wysiwyg) scheduleWysiwygRender()
       }
     } catch (err) {
       showError('拖拽处理失败', err)
@@ -2378,6 +2634,7 @@ function bindEvents() {
                   }
                   insertAtCursor(parts.join('\n'))
                   if (mode === 'preview') await renderPreview()
+                  else if (wysiwyg) scheduleWysiwygRender()
                   return
                 }
               } catch (e) { console.warn('直连上传失败或未配置，回退为本地路径', e) }
@@ -2494,6 +2751,7 @@ function replaceUploadingPlaceholder(id: string, replacementMarkdown: string) {
       refreshTitle()
       refreshStatus()
       if (mode === 'preview') void renderPreview()
+      else if (wysiwyg) scheduleWysiwygRender()
     }
   } catch {}
 }
@@ -2543,4 +2801,6 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   return Promise.resolve()
 }
 // ========= END =========
+
+
 
