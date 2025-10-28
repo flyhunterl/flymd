@@ -3,7 +3,7 @@
 
 > 多平台 专注写作 极致简洁 即开即用
 
-[![Version](https://img.shields.io/badge/version-0.0.6beta-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-0.0.6--beta-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -18,7 +18,7 @@
 - 安全可靠：本地运行，无网络连接，预览 HTML 自动消毒 
 - 图床支持：支持S3/R2绑定，直接粘贴图片上传 上传成功后自行写好图片连接语法
 - 功能全面：MarkDown LaTeX Mermaid html全部支持
-- 即时渲染：所见模式，输入即渲染！（v0.0.6beta）
+- 即时渲染：所见模式，输入即渲染！（v0.0.6-beta）
 
 ## 📸 界面预览
 <p align="center">
@@ -90,7 +90,7 @@
 ### 安装使用（推荐）
 
 1. 前往 [Releases](https://github.com/flyhunterl/flymd/releases) 下载最新版本
-2. 运行 `flymd_0.0.6beta_x64_setup.exe` 安装（文件名以实际发布为准）
+2. 运行 `flymd_0.0.6-beta_x64_setup.exe` 安装（文件名以实际发布为准）
 3. 启动 flyMD，开始使用
 
 ## ⌨️ 快捷键
@@ -118,7 +118,7 @@
 
 ## 🗺️ 路线图
 
-## 更新 v0.0.6beta
+## 更新 v0.0.6-beta
 - 新增：所见模式（暂不支持Latex和mermaid，输入latex和mermaid的时候建议先切换回普通模式）
 
 
