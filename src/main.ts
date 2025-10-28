@@ -1156,7 +1156,20 @@ async function openFile2(preset?: unknown) {
     logDebug('openFile2.selected', { typeof: typeof selected, selected })
     logDebug('openFile2.normalizedPath', { typeof: typeof selectedPath, selectedPath })
 
-    const content = await readTextFile(selectedPath)
+    // 读取文件内容：优先使用 fs 插件；若因路径权限受限（forbidden path / not allowed）回退到后端命令
+    let content: string
+    try {
+      content = await readTextFile(selectedPath as any)
+    } catch (e: any) {
+      const msg = (e && (e.message || (e.toString?.()))) ? String(e.message || e.toString()) : ''
+      const isForbidden = /forbidden\s*path/i.test(msg) || /not\s*allowed/i.test(msg) || /EACCES|EPERM|Access\s*Denied/i.test(msg)
+      if (isForbidden && typeof invoke === 'function') {
+        // 使用后端无范围限制的读取作为兜底
+        content = await invoke<string>('read_text_file_any', { path: selectedPath })
+      } else {
+        throw e
+      }
+    }
     editor.value = content
     currentFilePath = selectedPath
     dirty = false
@@ -1194,7 +1207,17 @@ async function saveFile() {
     }
 
     logInfo('保存文件', { path: currentFilePath })
-    await writeTextFile(currentFilePath, editor.value)
+    try {
+      await writeTextFile(currentFilePath, editor.value)
+    } catch (e: any) {
+      const msg = (e && (e.message || (e.toString?.()))) ? String(e.message || e.toString()) : ''
+      const isForbidden = /forbidden\s*path/i.test(msg) || /not\s*allowed/i.test(msg) || /EACCES|EPERM|Access\s*Denied/i.test(msg)
+      if (isForbidden && typeof invoke === 'function') {
+        await invoke('write_text_file_any', { path: currentFilePath, content: editor.value })
+      } else {
+        throw e
+      }
+    }
     dirty = false
     refreshTitle()
     await pushRecent(currentFilePath)
@@ -1226,7 +1249,17 @@ async function saveAs() {
       return
     }
     logInfo('另存为文件', { path: target })
-    await writeTextFile(target, editor.value)
+    try {
+      await writeTextFile(target, editor.value)
+    } catch (e: any) {
+      const msg = (e && (e.message || (e.toString?.()))) ? String(e.message || e.toString()) : ''
+      const isForbidden = /forbidden\s*path/i.test(msg) || /not\s*allowed/i.test(msg) || /EACCES|EPERM|Access\s*Denied/i.test(msg)
+      if (isForbidden && typeof invoke === 'function') {
+        await invoke('write_text_file_any', { path: target, content: editor.value })
+      } else {
+        throw e
+      }
+    }
     currentFilePath = target
     dirty = false
     refreshTitle()

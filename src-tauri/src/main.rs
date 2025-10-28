@@ -266,7 +266,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
@@ -327,6 +327,26 @@ async fn read_text_file_any(path: String) -> Result<String, String> {
   .map_err(|e| format!("join error: {e}"))?;
 
   res
+}
+
+#[tauri::command]
+async fn write_text_file_any(path: String, content: String) -> Result<(), String> {
+  use std::fs;
+  use std::path::PathBuf;
+
+  let pathbuf = PathBuf::from(path);
+  // 后台线程写入，避免阻塞异步执行器
+  tauri::async_runtime::spawn_blocking(move || {
+    if let Some(parent) = pathbuf.parent() {
+      fs::create_dir_all(parent).map_err(|e| format!("create_dir_all error: {e}"))?;
+    }
+    fs::write(&pathbuf, content.as_bytes()).map_err(|e| format!("write error: {e}"))?;
+    Ok::<(), String>(())
+  })
+  .await
+  .map_err(|e| format!("join error: {e}"))??;
+
+  Ok(())
 }
 
 #[tauri::command]
