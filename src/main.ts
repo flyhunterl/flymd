@@ -95,6 +95,68 @@ let dirty = false // 是否有未保存更改
 // 配置存储（使用 tauri store）
 let store: Store | null = null
 
+// 文档阅读/编辑位置持久化（最小实现）
+type DocPos = {
+  pos: number
+  end?: number
+  scroll: number
+  pscroll: number
+  mode: Mode | 'wysiwyg'
+  ts: number
+}
+let _docPosSaveTimer: number | null = null
+async function getDocPosMap(): Promise<Record<string, DocPos>> {
+  try {
+    if (!store) return {}
+    const m = await store.get('docPos')
+    return (m && typeof m === 'object') ? (m as Record<string, DocPos>) : {}
+  } catch { return {} }
+}
+async function saveCurrentDocPosNow() {
+  try {
+    if (!currentFilePath) return
+    const map = await getDocPosMap()
+    map[currentFilePath] = {
+      pos: editor.selectionStart >>> 0,
+      end: editor.selectionEnd >>> 0,
+      scroll: editor.scrollTop >>> 0,
+      pscroll: preview.scrollTop >>> 0,
+      mode: (wysiwyg ? 'wysiwyg' : mode),
+      ts: Date.now(),
+    }
+    if (store) {
+      await store.set('docPos', map)
+      await store.save()
+    }
+  } catch {}
+}
+function scheduleSaveDocPos() {
+  try {
+    if (_docPosSaveTimer != null) { clearTimeout(_docPosSaveTimer); _docPosSaveTimer = null }
+    _docPosSaveTimer = window.setTimeout(() => { void saveCurrentDocPosNow() }, 400)
+  } catch {}
+}
+async function restoreDocPosIfAny(path?: string) {
+  try {
+    const p = (path || currentFilePath || '') as string
+    if (!p) return
+    const map = await getDocPosMap()
+    const s = map[p]
+    if (!s) return
+    // 恢复编辑器光标与滚动
+    try {
+      const st = Math.max(0, Math.min(editor.value.length, s.pos >>> 0))
+      const ed = Math.max(0, Math.min(editor.value.length, (s.end ?? st) >>> 0))
+      editor.selectionStart = st
+      editor.selectionEnd = ed
+      editor.scrollTop = Math.max(0, s.scroll >>> 0)
+      refreshStatus()
+    } catch {}
+    // 恢复预览滚动（需在预览渲染后调用）
+    try { preview.scrollTop = Math.max(0, s.pscroll >>> 0) } catch {}
+  } catch {}
+}
+
 // 日志相关
 const LOG_NAME = 'flymd.log'
 
@@ -1372,6 +1434,8 @@ async function openFile(preset?: string) {
     refreshTitle()
     refreshStatus()
     await switchToPreviewAfterOpen()
+    // 打开后恢复上次阅读/编辑位置
+    await restoreDocPosIfAny(selectedPath)
     await pushRecent(currentFilePath)
     await renderRecentPanel(false)
     logInfo('�ļ����سɹ�', { path: selectedPath, size: content.length })
@@ -1466,6 +1530,8 @@ async function openFile2(preset?: unknown) {
     
     // 打开后默认进入预览模式
     await switchToPreviewAfterOpen()
+    // 恢复上次阅读/编辑位置（编辑器光标/滚动与预览滚动）
+    await restoreDocPosIfAny(selectedPath)
     await pushRecent(currentFilePath)
     await renderRecentPanel(false)
     logInfo('文件打开成功', { path: selectedPath, size: content.length })
@@ -2344,11 +2410,14 @@ function bindEvents() {
   if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
 
   // 所见模式：输入/合成结束/滚动时联动渲染与同步
-  editor.addEventListener('input', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } })
-  editor.addEventListener('compositionend', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } })
-  editor.addEventListener('scroll', () => { if (wysiwyg) { syncScrollEditorToPreview(); updateWysiwygCaretDot() } })
-  editor.addEventListener('keyup', (e) => { if (wysiwyg) { if (wysiwygEnterToRenderOnly && e.key === 'Enter') scheduleWysiwygRender(); else void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } })
-  editor.addEventListener('click', () => { if (wysiwyg) { void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } })
+  editor.addEventListener('input', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('compositionend', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('scroll', () => { if (wysiwyg) { syncScrollEditorToPreview(); updateWysiwygCaretDot() } scheduleSaveDocPos() })
+  editor.addEventListener('keyup', (e) => { if (wysiwyg) { if (wysiwygEnterToRenderOnly && e.key === 'Enter') scheduleWysiwygRender(); else void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('click', () => { if (wysiwyg) { void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+
+  // 预览滚动也记录阅读位置
+  preview.addEventListener('scroll', () => { scheduleSaveDocPos() })
 
   // 绑定全局点击（图床弹窗测试按钮）
   document.addEventListener('click', async (ev) => {
@@ -2535,6 +2604,8 @@ function bindEvents() {
       if (!dirty) return
       // 先阻止关闭，再进行异步确认，确保不会直接退出
       event.preventDefault()
+      // 关闭前尝试保存当前阅读/编辑位置
+      try { await saveCurrentDocPosNow() } catch {}
       try {
         // 原生确认对话框（不会导致 Explorer/外壳异常）
         const ok = await ask('当前文件尚未保存，确认退出吗？', { title: '确认退出' })
@@ -2559,6 +2630,7 @@ function bindEvents() {
   try {
     if (!isTauriRuntime()) {
       window.addEventListener('beforeunload', (e) => {
+        try { void saveCurrentDocPosNow() } catch {}
         if (dirty) {
           e.preventDefault()
           ;(e as any).returnValue = ''
@@ -2810,6 +2882,3 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   return Promise.resolve()
 }
 // ========= END =========
-
-
-
