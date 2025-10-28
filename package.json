@@ -1,6 +1,6 @@
 {
   "name": "flymd",
-  "version": "0.0.5",
+  "version": "0.0.6beta",
   "private": true,
   "type": "module",
   "scripts": {
