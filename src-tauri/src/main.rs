@@ -304,7 +304,20 @@ fn main() {
       }
       // 其它初始化逻辑
       if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_focus();
+        #[cfg(target_os = "windows")]
+        {
+          let win_clone = win.clone();
+          std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let _ = win_clone.show();
+            let _ = win_clone.set_focus();
+          });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+          let _ = win.show();
+          let _ = win.set_focus();
+        }
       }
       Ok(())
     })

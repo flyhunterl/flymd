@@ -2418,7 +2418,7 @@ function bindEvents() {
     try { logInfo('打点:JS启动') } catch {}
 
     // 尝试初始化存储（失败不影响启动）
-    await initStore()
+    void initStore()
 
     // 开发模式：不再自动打开 DevTools，改为快捷键触发，避免干扰首屏
     // 快捷键见下方全局 keydown（F12 或 Ctrl+Shift+I）
@@ -2439,7 +2439,7 @@ function bindEvents() {
 
     // 尝试加载最近文件（可能失败）
     try {
-      await renderRecentPanel(false)
+      void renderRecentPanel(false)
     } catch (e) {
       console.warn('最近文件面板加载失败:', e)
     }
