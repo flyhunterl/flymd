@@ -53,6 +53,7 @@ let wysiwygEnterToRenderOnly = false
 let wysiwygLineEl: HTMLDivElement | null = null
 // 点状光标元素与度量缓存
 let wysiwygCaretEl: HTMLDivElement | null = null
+let wysiwygStatusEl: HTMLDivElement | null = null
 let _caretCharWidth = 0
 let _caretFontKey = ''
 // 点状“光标”闪烁控制（仅所见模式预览中的点）
@@ -362,6 +363,7 @@ async function setWysiwygEnabled(enable: boolean) {
       // 使用点状光标替代系统竖线光标
       try { if (container) container.classList.add('no-caret') } catch {}
       try { preview.classList.remove('hidden') } catch {}
+      try { if (wysiwygStatusEl) wysiwygStatusEl.classList.add('show') } catch {}
       await renderPreview()
       syncScrollEditorToPreview()
       updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink()
@@ -370,6 +372,7 @@ async function setWysiwygEnabled(enable: boolean) {
         try { preview.classList.add('hidden') } catch {}
       }
       try { if (container) container.classList.remove('no-caret') } catch {}
+      try { if (wysiwygStatusEl) wysiwygStatusEl.classList.remove('show') } catch {}
       if (wysiwygLineEl) wysiwygLineEl.classList.remove('show')
       if (wysiwygCaretEl) wysiwygCaretEl.classList.remove('show')
       stopDotBlink()
@@ -512,6 +515,12 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
     wysiwygCaretEl.id = 'wysiwyg-caret'
     wysiwygCaretEl.className = 'wysiwyg-caret'
     containerEl.appendChild(wysiwygCaretEl)
+    // 所见模式状态条
+    wysiwygStatusEl = document.createElement('div') as HTMLDivElement
+    wysiwygStatusEl.id = 'wysiwyg-status'
+    wysiwygStatusEl.className = 'wysiwyg-status'
+    wysiwygStatusEl.textContent = '所见模式 · 按 Ctrl+Shift+E 退出'
+    containerEl.appendChild(wysiwygStatusEl)
   } catch {}
   const panel = document.createElement('div')
   panel.id = 'recent-panel'

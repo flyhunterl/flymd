@@ -3,16 +3,18 @@
   目标：极简、即开即见，默认全屏编辑；预览为覆盖层，Ctrl+E 切换
 */
 
+
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
   --fg: #1f2328;
   --muted: #7a7a7a;
   --border: #e5e7eb;
-  /* 侧栏/面板浅灰背景（亮色下略浅，暗色下略深） */
   --panel-bg: #f3f4f6;
-  /* 所见模式背景（与普通模式区分） */
-  --wysiwyg-bg: #f6f8fb;
+  /* 所见模式变量 */
+  --wysiwyg-bg: #e9edf5;           /* 更深一点的蓝灰 */
+  --wysiwyg-status-h: 24px;        /* 状态条高度 */
+  --wysiwyg-status-bg: #d9e2f2;    /* 状态条背景 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,11 +24,11 @@
     --muted: #9ca3af;
     --border: #1f2937;
     --panel-bg: #0e1217;
-    /* 深色所见模式背景（略浅以区分） */
-    --wysiwyg-bg: #0f1319;
+    /* 深色所见模式变量 */
+    --wysiwyg-bg: #0b1016;         /* 更深的蓝黑 */
+    --wysiwyg-status-bg: #0f1a24;  /* 状态条背景 */
   }
 }
-
 html, body, #app { height: 100%; }
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 
@@ -511,3 +513,26 @@ html, body { overflow: hidden; }
 
 /* 所见模式：覆盖预览背景为专用色 */
 .container.wysiwyg .preview { background: var(--wysiwyg-bg); }
+
+
+
+/* 所见模式状态条 */
+.container.wysiwyg .wysiwyg-status {
+  position: absolute; bottom: 12px; right: 12px;
+  max-width: 60%;
+  background: var(--wysiwyg-status-bg);
+  color: var(--fg);
+  display: none; align-items: center; gap: 8px;
+  padding: 4px 10px; font-size: 12px; z-index: 3;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  pointer-events: none; /* 不遮挡点击编辑 */
+}
+.container.wysiwyg .wysiwyg-status.show { display: inline-flex; }
+
+/* 所见模式：为状态条让出上内边距 */
+.container.wysiwyg .preview { background: var(--wysiwyg-bg); padding-top: 14px; }
+.container.wysiwyg .editor { padding-top: 14px; }
+
+
