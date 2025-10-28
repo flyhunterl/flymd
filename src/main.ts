@@ -211,6 +211,24 @@ function normalizePath(input: unknown): string {
   }
 }
 
+// 统一读文件兜底：fs 失败则调用后端命令读取
+async function readTextFileAnySafe(p: string): Promise<string> {
+  try {
+    return await readTextFile(p as any)
+  } catch (e) {
+    try { return await invoke<string>('read_text_file_any', { path: p }) } catch { throw e }
+  }
+}
+
+// 统一写文件兜底：fs 失败则调用后端命令写入
+async function writeTextFileAnySafe(p: string, content: string): Promise<void> {
+  try {
+    await writeTextFile(p, content)
+  } catch (e) {
+    try { await invoke('write_text_file_any', { path: p, content }) } catch { throw e }
+  }
+}
+
 function showError(msg: string, err?: unknown) {
   void appendLog('ERROR', msg, err)
   // 确保 status 元素存在后才更新
@@ -1094,7 +1112,7 @@ async function openFile(preset?: string) {
     // 读取文件内容：优先使用 fs 插件；若因路径权限受限（forbidden path）则回退到自定义后端命令
     let content: string
     try {
-      content = await readTextFile(selectedPath as any)
+      content = await readTextFileAnySafe(selectedPath as any)
     } catch (e: any) {
       const msg = (e && (e.message || e.toString?.())) ? String(e.message || e.toString()) : ''
       if (/forbidden\s*path/i.test(msg) || /not\s*allowed/i.test(msg)) {
@@ -1159,7 +1177,7 @@ async function openFile2(preset?: unknown) {
     // 读取文件内容：优先使用 fs 插件；若因路径权限受限（forbidden path / not allowed）回退到后端命令
     let content: string
     try {
-      content = await readTextFile(selectedPath as any)
+      content = await readTextFileAnySafe(selectedPath as any)
     } catch (e: any) {
       const msg = (e && (e.message || (e.toString?.()))) ? String(e.message || e.toString()) : ''
       const isForbidden = /forbidden\s*path/i.test(msg) || /not\s*allowed/i.test(msg) || /EACCES|EPERM|Access\s*Denied/i.test(msg)
@@ -1175,9 +1193,7 @@ async function openFile2(preset?: unknown) {
     dirty = false
     refreshTitle()
     refreshStatus()
-  if (mode === 'preview') {
-      await renderPreview()
-    }
+    
     // 打开后默认进入预览模式
     await switchToPreviewAfterOpen()
     await pushRecent(currentFilePath)
@@ -1208,7 +1224,7 @@ async function saveFile() {
 
     logInfo('保存文件', { path: currentFilePath })
     try {
-      await writeTextFile(currentFilePath, editor.value)
+      await writeTextFileAnySafe(currentFilePath, editor.value)
     } catch (e: any) {
       const msg = (e && (e.message || (e.toString?.()))) ? String(e.message || e.toString()) : ''
       const isForbidden = /forbidden\s*path/i.test(msg) || /not\s*allowed/i.test(msg) || /EACCES|EPERM|Access\s*Denied/i.test(msg)
@@ -1250,7 +1266,7 @@ async function saveAs() {
     }
     logInfo('另存为文件', { path: target })
     try {
-      await writeTextFile(target, editor.value)
+      await writeTextFileAnySafe(target, editor.value)
     } catch (e: any) {
       const msg = (e && (e.message || (e.toString?.()))) ? String(e.message || e.toString()) : ''
       const isForbidden = /forbidden\s*path/i.test(msg) || /not\s*allowed/i.test(msg) || /EACCES|EPERM|Access\s*Denied/i.test(msg)
