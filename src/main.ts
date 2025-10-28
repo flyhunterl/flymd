@@ -2401,6 +2401,14 @@ function bindEvents() {
     bindEvents()  // 🔧 关键：无论存储是否成功，都要绑定事件
     try { logInfo('打点:事件绑定完成') } catch {}
 
+    // 兜底：主动询问后端是否有“默认程序/打开方式”传入的待打开路径
+    try {
+      const path = await invoke<string | null>('get_pending_open_path')
+      if (path && typeof path === 'string') {
+        void openFile2(path)
+      }
+    } catch {}
+
     // 尝试加载最近文件（可能失败）
     try {
       await renderRecentPanel(false)
@@ -2507,5 +2515,4 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   return Promise.resolve()
 }
 // ========= END =========
-
 

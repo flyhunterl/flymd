@@ -3,7 +3,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{Manager, Emitter};
+use tauri::{Manager, Emitter, State};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use chrono::{DateTime, Utc};
@@ -259,14 +259,21 @@ async fn presign_put(req: PresignReq) -> Result<PresignResp, String> {
 }
 
 fn main() {
+  // 共享状态：保存通过“默认程序/打开方式”传入的待打开路径（避免事件竞态丢失）
+  #[derive(Default)]
+  struct PendingOpen(StateInner);
+  #[derive(Default)]
+  struct StateInner(std::sync::Mutex<Option<String>>);
+
   tauri::Builder::default()
+    .manage(StateInner::default())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
@@ -286,6 +293,10 @@ fn main() {
             // 延迟发送事件，确保渲染侧事件监听已注册
             let win_clone = win.clone();
             let path = p.to_string_lossy().to_string();
+            // 同时把路径写入共享状态，前端可在启动后主动拉取
+            if let Some(state) = app.try_state::<StateInner>() {
+              if let Ok(mut slot) = state.0.lock() { *slot = Some(path.clone()); }
+            }
             std::thread::spawn(move || {
               std::thread::sleep(Duration::from_millis(500));
               let _ = win_clone.emit("open-file", path);
@@ -347,6 +358,16 @@ async fn write_text_file_any(path: String, content: String) -> Result<(), String
   .map_err(|e| format!("join error: {e}"))??;
 
   Ok(())
+}
+
+// 前端兜底查询：获取并清空待打开路径，避免事件竞态丢失
+#[tauri::command]
+async fn get_pending_open_path(state: State<'_, StateInner>) -> Result<Option<String>, ()> {
+  if let Ok(mut slot) = state.0.lock() {
+    Ok(slot.take())
+  } else {
+    Ok(None)
+  }
 }
 
 #[tauri::command]
