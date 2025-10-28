@@ -4,6 +4,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::{Manager, Emitter, State};
+// 全局共享：保存通过“打开方式/默认程序”传入且可能早于前端监听的文件路径
+#[derive(Default)]
+struct PendingOpenPath(std::sync::Mutex<Option<String>>);
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use chrono::{DateTime, Utc};
@@ -259,14 +262,8 @@ async fn presign_put(req: PresignReq) -> Result<PresignResp, String> {
 }
 
 fn main() {
-  // 共享状态：保存通过“默认程序/打开方式”传入的待打开路径（避免事件竞态丢失）
-  #[derive(Default)]
-  struct PendingOpen(StateInner);
-  #[derive(Default)]
-  struct StateInner(std::sync::Mutex<Option<String>>);
-
   tauri::Builder::default()
-    .manage(StateInner::default())
+    .manage(PendingOpenPath::default())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_store::Builder::default().build())
@@ -294,7 +291,7 @@ fn main() {
             let win_clone = win.clone();
             let path = p.to_string_lossy().to_string();
             // 同时把路径写入共享状态，前端可在启动后主动拉取
-            if let Some(state) = app.try_state::<StateInner>() {
+            if let Some(state) = app.try_state::<PendingOpenPath>() {
               if let Ok(mut slot) = state.0.lock() { *slot = Some(path.clone()); }
             }
             std::thread::spawn(move || {
@@ -362,7 +359,7 @@ async fn write_text_file_any(path: String, content: String) -> Result<(), String
 
 // 前端兜底查询：获取并清空待打开路径，避免事件竞态丢失
 #[tauri::command]
-async fn get_pending_open_path(state: State<'_, StateInner>) -> Result<Option<String>, ()> {
+async fn get_pending_open_path(state: State<'_, PendingOpenPath>) -> Result<Option<String>, ()> {
   if let Ok(mut slot) = state.0.lock() {
     Ok(slot.take())
   } else {
