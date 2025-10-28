@@ -283,7 +283,7 @@ fn main() {
           if let Some(p) = args.into_iter().find(|p| {
             if !p.exists() { return false; }
             match p.extension().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase()) {
-              Some(ext) => ext == "md" || ext == "markdown" || ext == "txt",
+              Some(ext) => ext == "md" || ext == "markdown" || ext == "txt" || ext == "pdf",
               None => false,
             }
           }) {

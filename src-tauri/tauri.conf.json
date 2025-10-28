@@ -108,6 +108,15 @@
         "description": "Markdown 文档",
         "mimeType": "text/markdown",
         "name": "Markdown"
+      },
+      {
+        "ext": [
+          "pdf"
+        ],
+        "role": "Viewer",
+        "description": "PDF document",
+        "mimeType": "application/pdf",
+        "name": "PDF"
       }
     ]
   }
