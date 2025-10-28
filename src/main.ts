@@ -1130,6 +1130,7 @@ async function openFile(preset?: string) {
     dirty = false
     refreshTitle()
     refreshStatus()
+    await switchToPreviewAfterOpen()
     await pushRecent(currentFilePath)
     await renderRecentPanel(false)
     logInfo('�ļ����سɹ�', { path: selectedPath, size: content.length })
@@ -1371,12 +1372,10 @@ function syncToggleButton() {
 
 // 打开文件后强制切换为预览模式
 async function switchToPreviewAfterOpen() {
-  try {
-    mode = 'preview'
-    await renderPreview()
-    preview.classList.remove('hidden')
-    syncToggleButton()
-  } catch {}
+  mode = 'preview'
+  try { await renderPreview() } catch (e) { try { showError('预览渲染失败', e) } catch {} }
+  try { preview.classList.remove('hidden') } catch {}
+  try { syncToggleButton() } catch {}
 }
 
 // 绑定事件
@@ -2508,7 +2507,5 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   return Promise.resolve()
 }
 // ========= END =========
-
-
 
 
