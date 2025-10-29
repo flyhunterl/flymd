@@ -3554,6 +3554,43 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
         return
       }
     } catch {}
+    // 新增：在未配置图床时，优先尝试将粘贴图片落盘到与当前文档同级的 images/ 目录，并插入相对路径
+    try {
+      if (isTauriRuntime() && currentFilePath) {
+        const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
+        const sep = base.includes('\\') ? '\\' : '/'
+        const imgDir = base + sep + 'images'
+        try { await ensureDir(imgDir) } catch {}
+        const dst = imgDir + sep + fname
+        try {
+          const buf = new Uint8Array(await file.arrayBuffer())
+          await writeFile(dst as any, buf as any)
+          const rel = 'images/' + fname  // 相对当前文档目录的路径
+          replaceUploadingPlaceholder(id, `![${fname}](${rel})`)
+          return
+        } catch {}
+      }
+    } catch {}
+    // 新增：未保存的新文档场景，若配置了默认粘贴目录，则将图片落盘到该目录并插入本地路径
+    try {
+      if (isTauriRuntime() && !currentFilePath) {
+        const dir = await getDefaultPasteDir()
+        if (dir) {
+          const baseDir = dir.replace(/[\\/]+$/, '')
+          const sep = baseDir.includes('\\') ? '\\' : '/'
+          const dst = baseDir + sep + fname
+          try {
+            const buf = new Uint8Array(await file.arrayBuffer())
+            try { await ensureDir(baseDir) } catch {}
+            await writeFile(dst as any, buf as any)
+            const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+            const mdUrl = needAngle ? `<${dst}>` : dst
+            replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
+            return
+          } catch {}
+        }
+      }
+    } catch {}
     try {
       const dataUrl = await fileToDataUrl(file)
       replaceUploadingPlaceholder(id, `![${fname}](${dataUrl})`)
