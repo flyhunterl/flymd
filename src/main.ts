@@ -640,8 +640,8 @@ function autoNewlineAfterBackticksInWysiwyg() {
     if (last3 === '```') {
       const v = editor.value
       // 在光标处插入换行，但将光标保持在换行前，便于继续输入语言标识（如 ```js\n）
-      editor.value = v.slice(0, pos) + '\n' + v.slice(pos)
-      editor.selectionStart = editor.selectionEnd = pos
+        editor.value = v.slice(0, pos) + '\n' + v.slice(pos)
+        editor.selectionStart = editor.selectionEnd = pos
       dirty = true
       refreshTitle()
     }
