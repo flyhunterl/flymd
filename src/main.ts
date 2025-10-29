@@ -18,7 +18,8 @@ import { open, save, ask } from '@tauri-apps/plugin-dialog'
 import { readTextFile, writeTextFile, readDir, stat, readFile, mkdir  , rename, remove, writeFile, exists, copyFile } from '@tauri-apps/plugin-fs'
 import { Store } from '@tauri-apps/plugin-store'
 import { open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
-import { open as openExternal } from '@tauri-apps/plugin-opener'
+// Tauri v2 插件 opener 的导出为 openUrl / openPath，不再是 open
+import { openUrl, openPath } from '@tauri-apps/plugin-opener'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
@@ -1907,7 +1908,7 @@ type CheckUpdateResp = {
 
 async function openInBrowser(url: string) {
   try {
-    if (isTauriRuntime()) { await openExternal(url) }
+    if (isTauriRuntime()) { await openUrl(url) }
     else { window.open(url, '_blank', 'noopener,noreferrer') }
   } catch {
     try { window.open(url, '_blank', 'noopener,noreferrer') } catch {}
@@ -1998,7 +1999,7 @@ async function checkUpdateInteractive() {
         upMsg('正在下载安装包…')
         const savePath = await invoke('download_file', { url: resp.assetWin.proxyUrl || resp.assetWin.directUrl, useProxy: true }) as any as string
         upMsg('下载完成，正在启动安装…')
-        try { await openExternal(savePath) } catch { /* 回退：不提示失败，尽量不打断 */ }
+        try { await openPath(savePath) } catch { /* 回退：不提示失败，尽量不打断 */ }
       } catch (e) {
         upMsg('下载或启动安装失败，将打开发布页');
         await openInBrowser(resp.htmlUrl)

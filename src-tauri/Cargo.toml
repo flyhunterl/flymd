@@ -22,7 +22,7 @@ tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 percent-encoding = "2"
 url = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"

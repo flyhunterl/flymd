@@ -1654,6 +1654,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "chrono",
+ "futures-util",
  "hex",
  "hmac",
  "percent-encoding",

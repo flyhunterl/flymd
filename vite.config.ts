@@ -22,8 +22,9 @@ export default defineConfig(({ mode }) => ({
     }
   },
   server: {
+    host: '127.0.0.1',
     port: 5173,
-    strictPort: false
+    strictPort: true
   },
   // 生产构建：分包与剥离 console/debugger；开发：预打包重库
   esbuild: mode === 'production' ? { drop: ['console', 'debugger'] } : {},

@@ -1,0 +1,200 @@
+  (appimage, deb)
+}
+
+fn match_windows_asset(assets: &[GhAsset]) -> Option<&GhAsset> {
+  for a in assets {
+    let n = a.name.to_ascii_lowercase();
+    let is_arm = n.contains("arm64") || n.contains("aarch64") || n.contains("armv7");
+    if is_arm { continue; }
+    if (n.ends_with(".exe") || n.ends_with(".msi")) && (n.contains("x64") || n.contains("x86_64") || n.contains("amd64")) {
+      return Some(a);
+    }
+  }
+  None
+}
+
+#[tauri::command]
+async fn check_update(force: Option<bool>, include_prerelease: Option<bool>) -> Result<CheckUpdateResp, String> {
+  // 当前版本：与 tauri.conf.json 一致（构建时可由环境注入，这里直接读取 Cargo.toml 同步版本）
+  let current = env!("CARGO_PKG_VERSION").to_string();
+  let (os_tag, _arch_tag) = os_arch_tag();
+
+  // 节流留空：简单实现始终请求（前端可决定调用频率）
+
+  let url = "https://api.github.com/repos/flyhunterl/flymd/releases";
+  let client = reqwest::Client::builder()
+    .user_agent("flymd-updater")
+    .build()
+    .map_err(|e| format!("build client error: {e}"))?;
+  let resp = client
+    .get(url)
+    .header("Accept", "application/vnd.github+json")
+    .send().await.map_err(|e| format!("request error: {e}"))?;
+  if !resp.status().is_success() { return Err(format!("http status {}", resp.status())); }
+  let releases: Vec<GhRelease> = resp.json().await.map_err(|e| format!("json error: {e}"))?;
+  let include_pre = include_prerelease.unwrap_or(false);
+  let latest = releases.into_iter().find(|r| !r.draft && (include_pre || !r.prerelease))
+    .ok_or_else(|| "no release found".to_string())?;
+
+  let latest_tag = latest.tag_name.trim().to_string();
+  let n_cur = norm_ver(&current);
+  let n_new = norm_ver(&latest_tag);
+  let has_update = is_better(&n_new, &n_cur);
+
+  // 组装资产信息
+  let mut asset_win = None;
+  let mut asset_linux_appimage = None;
+  let mut asset_linux_deb = None;
+  if os_tag == "windows" {
+    if let Some(a) = match_windows_asset(&latest.assets) {
+      asset_win = Some(UpdateAssetInfo{
+        name: a.name.clone(),
+        size: a.size.unwrap_or(0),
+        direct_url: a.browser_download_url.clone(),
+        proxy_url: gh_proxy_url(&a.browser_download_url),
+      });
+    }
+  } else if os_tag == "linux" {
+    let (ai, deb) = match_linux_assets(&latest.assets);
+    if let Some(a) = ai {
+      asset_linux_appimage = Some(UpdateAssetInfo{
+        name: a.name.clone(),
+        size: a.size.unwrap_or(0),
+        direct_url: a.browser_download_url.clone(),
+        proxy_url: gh_proxy_url(&a.browser_download_url),
+      });
+    }
+    if let Some(a) = deb {
+      asset_linux_deb = Some(UpdateAssetInfo{
+        name: a.name.clone(),
+        size: a.size.unwrap_or(0),
+        direct_url: a.browser_download_url.clone(),
+        proxy_url: gh_proxy_url(&a.browser_download_url),
+      });
+    }
+  }
+
+  let notes = latest.body.unwrap_or_default();
+  let name = latest.name.unwrap_or_else(|| latest_tag.clone());
+
+  Ok(CheckUpdateResp{
+    has_update,
+    current,
+    latest: latest_tag,
+    release_name: name,
+    notes,
+    html_url: latest.html_url,
+    asset_win,
+    asset_linux_appimage,
+    asset_linux_deb,
+  })
+}
+
+#[tauri::command]
+async fn download_file(url: String, use_proxy: Option<bool>) -> Result<String, String> {
+  let client = reqwest::Client::builder()
+    .user_agent("flymd-updater")
+    .build()
+    .map_err(|e| format!("build client error: {e}"))?;
+
+  // 解析文件名
+  let (direct, proxy) = {
+    let u = url::Url::parse(&url).map_err(|e| format!("invalid url: {e}"))?;
+    let fname = u.path_segments().and_then(|mut s| s.next_back()).unwrap_or("download.bin");
+    let mut path = std::env::temp_dir();
+    path.push(fname);
+    let direct = (u, path);
+    let proxy = (url::Url::parse(&gh_proxy_url(&url)).map_err(|e| format!("invalid proxy url: {e}"))?, std::env::temp_dir().join(fname));
+    (direct, proxy)
+  };
+
+  // 下载函数
+  async fn do_fetch(client: &reqwest::Client, url: &url::Url, save: &std::path::Path) -> Result<(), String> {
+    let resp = client.get(url.clone()).send().await.map_err(|e| format!("request error: {e}"))?;
+    if !resp.status().is_success() { return Err(format!("http status {}", resp.status())); }
+    let mut f = std::fs::File::create(save).map_err(|e| format!("create file error: {e}"))?;
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+      let bytes = chunk.map_err(|e| format!("read chunk error: {e}"))?;
+      std::io::Write::write_all(&mut f, &bytes).map_err(|e| format!("write error: {e}"))?;
+    }
+    Ok(())
+  }
+
+  let want_proxy = use_proxy.unwrap_or(false);
+  let mut last_err: Option<String> = None;
+  if want_proxy {
+    if let Err(e) = do_fetch(&client, &proxy.0, &proxy.1).await { last_err = Some(e); } else { return Ok(proxy.1.to_string_lossy().to_string()); }
+    // 代理失败 -> 尝试直连
+    if let Err(e) = do_fetch(&client, &direct.0, &direct.1).await { last_err = Some(e); } else { return Ok(direct.1.to_string_lossy().to_string()); }
+  } else {
+    if let Err(e) = do_fetch(&client, &direct.0, &direct.1).await { last_err = Some(e); } else { return Ok(direct.1.to_string_lossy().to_string()); }
+    // 直连失败 -> 尝试代理
+    if let Err(e) = do_fetch(&client, &proxy.0, &proxy.1).await { last_err = Some(e); } else { return Ok(proxy.1.to_string_lossy().to_string()); }
+  }
+  Err(last_err.unwrap_or_else(|| "download failed".into()))
+}
+
+#[tauri::command]
+async fn read_text_file_any(path: String) -> Result<String, String> {
+  use std::fs::File;
+  use std::io::Read;
+  use std::path::PathBuf;
+
+  let pathbuf = PathBuf::from(path);
+  if !pathbuf.exists() {
+    return Err("path not found".into());
+  }
+
+  // 后台线程读取，避免阻塞异步运行时
+  let res = tauri::async_runtime::spawn_blocking(move || {
+    let mut f = File::open(&pathbuf).map_err(|e| format!("open error: {e}"))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).map_err(|e| format!("read error: {e}"))?;
+    let s = String::from_utf8_lossy(&buf).to_string();
+    Ok::<String, String>(s)
+  })
+  .await
+  .map_err(|e| format!("join error: {e}"))?;
+
+  res
+}
+
+#[tauri::command]
+async fn write_text_file_any(path: String, content: String) -> Result<(), String> {
+  use std::fs;
+  use std::path::PathBuf;
+
+  let pathbuf = PathBuf::from(path);
+  // 后台线程写入，避免阻塞异步执行器
+  tauri::async_runtime::spawn_blocking(move || {
+    if let Some(parent) = pathbuf.parent() {
+      fs::create_dir_all(parent).map_err(|e| format!("create_dir_all error: {e}"))?;
+    }
+    fs::write(&pathbuf, content.as_bytes()).map_err(|e| format!("write error: {e}"))?;
+    Ok::<(), String>(())
+  })
+  .await
+  .map_err(|e| format!("join error: {e}"))??;
+
+  Ok(())
+}
+
+// 前端兜底查询：获取并清空待打开路径，避免事件竞态丢失
+#[tauri::command]
+async fn get_pending_open_path(state: State<'_, PendingOpenPath>) -> Result<Option<String>, ()> {
+  if let Ok(mut slot) = state.0.lock() {
+    Ok(slot.take())
+  } else {
+    Ok(None)
+  }
+}
+
+#[tauri::command]
+async fn move_to_trash(path: String) -> Result<(), String> {
+  // 使用 trash crate 跨平台移动到回收站
+  tauri::async_runtime::spawn_blocking(move || {
+    trash::delete(path).map_err(|e| format!("move_to_trash error: {e}"))
+  })
+  .await

@@ -10,7 +10,7 @@ struct PendingOpenPath(std::sync::Mutex<Option<String>>);
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use chrono::{DateTime, Utc};
-use serde_json::json;
+
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -434,7 +434,7 @@ fn match_windows_asset(assets: &[GhAsset]) -> Option<&GhAsset> {
 }
 
 #[tauri::command]
-async fn check_update(force: Option<bool>, include_prerelease: Option<bool>) -> Result<CheckUpdateResp, String> {
+async fn check_update(_force: Option<bool>, include_prerelease: Option<bool>) -> Result<CheckUpdateResp, String> {
   // 当前版本：与 tauri.conf.json 一致（构建时可由环境注入，这里直接读取 Cargo.toml 同步版本）
   let current = env!("CARGO_PKG_VERSION").to_string();
   let (os_tag, _arch_tag) = os_arch_tag();
@@ -520,11 +520,18 @@ async fn download_file(url: String, use_proxy: Option<bool>) -> Result<String, S
   // 解析文件名
   let (direct, proxy) = {
     let u = url::Url::parse(&url).map_err(|e| format!("invalid url: {e}"))?;
-    let fname = u.path_segments().and_then(|mut s| s.next_back()).unwrap_or("download.bin");
+    let fname = u
+      .path_segments()
+      .and_then(|mut s| s.next_back())
+      .unwrap_or("download.bin")
+      .to_string();
     let mut path = std::env::temp_dir();
-    path.push(fname);
+    path.push(&fname);
     let direct = (u, path);
-    let proxy = (url::Url::parse(&gh_proxy_url(&url)).map_err(|e| format!("invalid proxy url: {e}"))?, std::env::temp_dir().join(fname));
+    let proxy = (
+      url::Url::parse(&gh_proxy_url(&url)).map_err(|e| format!("invalid proxy url: {e}"))?,
+      std::env::temp_dir().join(&fname)
+    );
     (direct, proxy)
   };
 
