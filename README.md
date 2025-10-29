@@ -128,7 +128,7 @@
 - 优化: 修改所见模式处理Latex和mermaid的逻辑，现在所见模式支持Latex和mermaid了
 - 优化: 缩短代码区域的行距，以及其他显示效果优化
 
-## 更新 v0.0.6
+## 更新 v0.0.6-beta
 - 新增：所见模式（暂不支持Latex和mermaid，输入latex和mermaid的时候建议先切换回普通模式）
 
 
