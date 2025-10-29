@@ -47,6 +47,37 @@ let mermaidSvgCacheVersion = 0
 
 function hashMermaidCode(code: string): string {
   try {
+    // WYSIWYG 情况下，在编辑未闭合的 ```mermaid 围栏内时，跳过 Mermaid 渲染以避免每次输入导致整屏重排/闪烁
+    const _skipMermaid = (() => {
+      if (!wysiwyg) return false
+      try {
+        const text = editor.value
+        const caret = editor.selectionStart >>> 0
+        const lines = text.split('\n')
+        const caretLine = (() => { try { return text.slice(0, caret).split('\n').length - 1 } catch { return -1 } })()
+        let inside = false
+        let fenceCh = ''
+        let fenceLang = ''
+        for (let i = 0; i <= Math.min(Math.max(0, caretLine), lines.length - 1); i++) {
+          const ln = lines[i]
+          const m = ln.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+          if (m) {
+            const ch = m[1][0]
+            if (!inside) {
+              inside = true
+              fenceCh = ch
+              fenceLang = (m[2] || '').trim().split(/\s+/)[0]?.toLowerCase() || ''
+            } else if (ch === fenceCh) {
+              inside = false
+              fenceCh = ''
+              fenceLang = ''
+            }
+          }
+        }
+        return !!(inside && fenceLang === 'mermaid')
+      } catch { return false }
+    })()
+    if (_skipMermaid) { throw new Error('SKIP_MERMAID_RENDER_IN_WYSIWYG') }
     if (!code) return 'mmd-empty'
     let hash = 2166136261 >>> 0 // FNV-1a 32 位初始值
     for (let i = 0; i < code.length; i++) {
@@ -1459,6 +1490,74 @@ async function renderPreview() {
   // 包裹一层容器，用于样式定宽居中显示
   preview.innerHTML = `<div class="preview-body">${safe}</div>`
   try { decorateCodeBlocks(preview) } catch {}
+  // WYSIWYG 防闪烁：使用离屏容器完成 Mermaid 替换后一次性提交
+  try {
+    preview.classList.add('rendering')
+    const buf = document.createElement('div') as HTMLDivElement
+    buf.className = 'preview-body'
+    buf.innerHTML = safe
+    try {
+      const codeBlocks = buf.querySelectorAll('pre > code.language-mermaid') as NodeListOf<HTMLElement>
+      codeBlocks.forEach((code) => {
+        try {
+          const pre = code.parentElement as HTMLElement
+          const text = code.textContent || ''
+          const div = document.createElement('div')
+          div.className = 'mermaid'
+          div.textContent = text
+          pre.replaceWith(div)
+        } catch {}
+      })
+    } catch {}
+    try {
+      const preMermaid = buf.querySelectorAll('pre.mermaid')
+      preMermaid.forEach((pre) => {
+        try {
+          const text = pre.textContent || ''
+          const div = document.createElement('div')
+          div.className = 'mermaid'
+          div.textContent = text
+          pre.replaceWith(div)
+        } catch {}
+      })
+    } catch {}
+    try {
+      const nodes = Array.from(buf.querySelectorAll('.mermaid')) as HTMLElement[]
+      if (nodes.length > 0) {
+        let mermaid: any
+        try { mermaid = (await import('mermaid')).default } catch (e1) { try { mermaid = (await import('mermaid/dist/mermaid.esm.mjs')).default } catch (e2) { throw e2 } }
+        if (!mermaidReady) { mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' }); mermaidReady = true }
+        for (let i = 0; i < nodes.length; i++) {
+          const el = nodes[i]
+          const code = el.textContent || ''
+          const hash = hashMermaidCode(code)
+          const desiredId = `${hash}-${mermaidSvgCacheVersion}-${i}`
+          try {
+            let svgMarkup = getCachedMermaidSvg(code, desiredId)
+            if (!svgMarkup) {
+              const renderId = `${hash}-${Date.now()}-${i}`
+              const { svg } = await mermaid.render(renderId, code)
+              cacheMermaidSvg(code, svg, renderId)
+              svgMarkup = svg.split(renderId).join(desiredId)
+            }
+            const wrap = document.createElement('div')
+            wrap.innerHTML = svgMarkup || ''
+            const svgEl = wrap.firstElementChild as SVGElement | null
+            if (svgEl) {
+              if (!svgEl.id) svgEl.id = desiredId
+              el.replaceWith(svgEl)
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+    // 一次性替换预览 DOM
+    try {
+      preview.innerHTML = ''
+      preview.appendChild(buf)
+      try { decorateCodeBlocks(preview) } catch {}
+    } catch {}
+  } catch {} finally { try { preview.classList.remove('rendering') } catch {} }
   // 所见模式下，确保“模拟光标 _”在预览区可见
   try { if (wysiwyg) ensureWysiwygCaretDotInView() } catch {}
   // 外链安全属性

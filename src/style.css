@@ -514,6 +514,9 @@ html, body { overflow: hidden; }
 /* 所见模式：覆盖预览背景为专用色 */
 .container.wysiwyg .preview { background: var(--wysiwyg-bg); }
 
+/* 所见模式下渲染中：隐藏预览层，避免原始 mermaid 代码短暂闪现 */
+.container.wysiwyg .preview.rendering { visibility: hidden; }
+
 
 
 /* 所见模式状态条 */
