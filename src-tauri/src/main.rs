@@ -10,6 +10,7 @@ struct PendingOpenPath(std::sync::Mutex<Option<String>>);
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use chrono::{DateTime, Utc};
+use serde_json::json;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -270,7 +271,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, check_update, download_file])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
@@ -323,6 +324,236 @@ fn main() {
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAssetInfo {
+  name: String,
+  size: u64,
+  direct_url: String,
+  proxy_url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckUpdateResp {
+  has_update: bool,
+  current: String,
+  latest: String,
+  release_name: String,
+  notes: String,
+  html_url: String,
+  // Windows 推荐资产
+  asset_win: Option<UpdateAssetInfo>,
+  // Linux 双资产
+  asset_linux_appimage: Option<UpdateAssetInfo>,
+  asset_linux_deb: Option<UpdateAssetInfo>,
+}
+
+fn norm_ver(v: &str) -> (i64, i64, i64, i64) {
+  // 版本比较：major.minor.patch + 权重（fix>无后缀>预发行）
+  let s = v.trim().trim_start_matches('v');
+  let mut parts = s.splitn(2, '-');
+  let core = parts.next().unwrap_or("");
+  let suffix = parts.next().unwrap_or("").to_ascii_lowercase();
+  let mut nums = core.split('.').take(3).map(|x| x.parse::<i64>().unwrap_or(0)).collect::<Vec<_>>();
+  while nums.len() < 3 { nums.push(0); }
+  let weight = if suffix.starts_with("fix") { 2 } else if suffix.is_empty() { 1 } else { 0 };
+  (nums[0], nums[1], nums[2], weight)
+}
+
+fn is_better(a: &(i64,i64,i64,i64), b: &(i64,i64,i64,i64)) -> bool {
+  // a > b ?
+  a.0 > b.0 || (a.0==b.0 && (a.1 > b.1 || (a.1==b.1 && (a.2 > b.2 || (a.2==b.2 && a.3 > b.3)))))
+}
+
+#[derive(Debug, Deserialize)]
+struct GhAsset { name: String, browser_download_url: String, size: Option<u64>, content_type: Option<String> }
+#[derive(Debug, Deserialize)]
+struct GhRelease {
+  tag_name: String,
+  name: Option<String>,
+  body: Option<String>,
+  draft: bool,
+  prerelease: bool,
+  html_url: String,
+  assets: Vec<GhAsset>,
+}
+
+fn gh_proxy_url(raw: &str) -> String {
+  // 代理前缀：按“https://gh-proxy.comb/原始URL”拼接
+  let prefix = "https://gh-proxy.comb/";
+  if raw.starts_with(prefix) { raw.to_string() } else { format!("{}{}", prefix, raw) }
+}
+
+fn os_arch_tag() -> (&'static str, &'static str) {
+  let os = {
+    #[cfg(target_os = "windows")] { "windows" }
+    #[cfg(target_os = "linux")] { "linux" }
+    #[cfg(target_os = "macos")] { "macos" }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))] { "other" }
+  };
+  let arch = {
+    #[cfg(target_arch = "x86_64")] { "x86_64" }
+    #[cfg(target_arch = "aarch64")] { "aarch64" }
+    #[cfg(target_arch = "x86")] { "x86" }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "x86")))] { "other" }
+  };
+  (os, arch)
+}
+
+fn match_linux_assets(assets: &[GhAsset]) -> (Option<&GhAsset>, Option<&GhAsset>) {
+  // 返回 (AppImage, Deb)
+  let mut appimage: Option<&GhAsset> = None;
+  let mut deb: Option<&GhAsset> = None;
+  for a in assets {
+    let n = a.name.to_ascii_lowercase();
+    // 排除 ARM 相关
+    let is_arm = n.contains("arm64") || n.contains("aarch64") || n.contains("armv7");
+    if is_arm { continue; }
+    if n.ends_with(".appimage") && (n.contains("x86_64") || n.contains("amd64")) {
+      if appimage.is_none() { appimage = Some(a); }
+    } else if n.ends_with(".deb") && (n.contains("x86_64") || n.contains("amd64")) {
+      if deb.is_none() { deb = Some(a); }
+    }
+  }
+  (appimage, deb)
+}
+
+fn match_windows_asset(assets: &[GhAsset]) -> Option<&GhAsset> {
+  for a in assets {
+    let n = a.name.to_ascii_lowercase();
+    let is_arm = n.contains("arm64") || n.contains("aarch64") || n.contains("armv7");
+    if is_arm { continue; }
+    if (n.ends_with(".exe") || n.ends_with(".msi")) && (n.contains("x64") || n.contains("x86_64") || n.contains("amd64")) {
+      return Some(a);
+    }
+  }
+  None
+}
+
+#[tauri::command]
+async fn check_update(force: Option<bool>, include_prerelease: Option<bool>) -> Result<CheckUpdateResp, String> {
+  // 当前版本：与 tauri.conf.json 一致（构建时可由环境注入，这里直接读取 Cargo.toml 同步版本）
+  let current = env!("CARGO_PKG_VERSION").to_string();
+  let (os_tag, _arch_tag) = os_arch_tag();
+
+  // 节流留空：简单实现始终请求（前端可决定调用频率）
+
+  let url = "https://api.github.com/repos/flyhunterl/flymd/releases";
+  let client = reqwest::Client::builder()
+    .user_agent("flymd-updater")
+    .build()
+    .map_err(|e| format!("build client error: {e}"))?;
+  let resp = client
+    .get(url)
+    .header("Accept", "application/vnd.github+json")
+    .send().await.map_err(|e| format!("request error: {e}"))?;
+  if !resp.status().is_success() { return Err(format!("http status {}", resp.status())); }
+  let releases: Vec<GhRelease> = resp.json().await.map_err(|e| format!("json error: {e}"))?;
+  let include_pre = include_prerelease.unwrap_or(false);
+  let latest = releases.into_iter().find(|r| !r.draft && (include_pre || !r.prerelease))
+    .ok_or_else(|| "no release found".to_string())?;
+
+  let latest_tag = latest.tag_name.trim().to_string();
+  let n_cur = norm_ver(&current);
+  let n_new = norm_ver(&latest_tag);
+  let has_update = is_better(&n_new, &n_cur);
+
+  // 组装资产信息
+  let mut asset_win = None;
+  let mut asset_linux_appimage = None;
+  let mut asset_linux_deb = None;
+  if os_tag == "windows" {
+    if let Some(a) = match_windows_asset(&latest.assets) {
+      asset_win = Some(UpdateAssetInfo{
+        name: a.name.clone(),
+        size: a.size.unwrap_or(0),
+        direct_url: a.browser_download_url.clone(),
+        proxy_url: gh_proxy_url(&a.browser_download_url),
+      });
+    }
+  } else if os_tag == "linux" {
+    let (ai, deb) = match_linux_assets(&latest.assets);
+    if let Some(a) = ai {
+      asset_linux_appimage = Some(UpdateAssetInfo{
+        name: a.name.clone(),
+        size: a.size.unwrap_or(0),
+        direct_url: a.browser_download_url.clone(),
+        proxy_url: gh_proxy_url(&a.browser_download_url),
+      });
+    }
+    if let Some(a) = deb {
+      asset_linux_deb = Some(UpdateAssetInfo{
+        name: a.name.clone(),
+        size: a.size.unwrap_or(0),
+        direct_url: a.browser_download_url.clone(),
+        proxy_url: gh_proxy_url(&a.browser_download_url),
+      });
+    }
+  }
+
+  let notes = latest.body.unwrap_or_default();
+  let name = latest.name.unwrap_or_else(|| latest_tag.clone());
+
+  Ok(CheckUpdateResp{
+    has_update,
+    current,
+    latest: latest_tag,
+    release_name: name,
+    notes,
+    html_url: latest.html_url,
+    asset_win,
+    asset_linux_appimage,
+    asset_linux_deb,
+  })
+}
+
+#[tauri::command]
+async fn download_file(url: String, use_proxy: Option<bool>) -> Result<String, String> {
+  let client = reqwest::Client::builder()
+    .user_agent("flymd-updater")
+    .build()
+    .map_err(|e| format!("build client error: {e}"))?;
+
+  // 解析文件名
+  let (direct, proxy) = {
+    let u = url::Url::parse(&url).map_err(|e| format!("invalid url: {e}"))?;
+    let fname = u.path_segments().and_then(|mut s| s.next_back()).unwrap_or("download.bin");
+    let mut path = std::env::temp_dir();
+    path.push(fname);
+    let direct = (u, path);
+    let proxy = (url::Url::parse(&gh_proxy_url(&url)).map_err(|e| format!("invalid proxy url: {e}"))?, std::env::temp_dir().join(fname));
+    (direct, proxy)
+  };
+
+  // 下载函数
+  async fn do_fetch(client: &reqwest::Client, url: &url::Url, save: &std::path::Path) -> Result<(), String> {
+    let resp = client.get(url.clone()).send().await.map_err(|e| format!("request error: {e}"))?;
+    if !resp.status().is_success() { return Err(format!("http status {}", resp.status())); }
+    let mut f = std::fs::File::create(save).map_err(|e| format!("create file error: {e}"))?;
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+      let bytes = chunk.map_err(|e| format!("read chunk error: {e}"))?;
+      std::io::Write::write_all(&mut f, &bytes).map_err(|e| format!("write error: {e}"))?;
+    }
+    Ok(())
+  }
+
+  let want_proxy = use_proxy.unwrap_or(false);
+  let mut last_err: Option<String> = None;
+  if want_proxy {
+    if let Err(e) = do_fetch(&client, &proxy.0, &proxy.1).await { last_err = Some(e); } else { return Ok(proxy.1.to_string_lossy().to_string()); }
+    // 代理失败 -> 尝试直连
+    if let Err(e) = do_fetch(&client, &direct.0, &direct.1).await { last_err = Some(e); } else { return Ok(direct.1.to_string_lossy().to_string()); }
+  } else {
+    if let Err(e) = do_fetch(&client, &direct.0, &direct.1).await { last_err = Some(e); } else { return Ok(direct.1.to_string_lossy().to_string()); }
+    // 直连失败 -> 尝试代理
+    if let Err(e) = do_fetch(&client, &proxy.0, &proxy.1).await { last_err = Some(e); } else { return Ok(proxy.1.to_string_lossy().to_string()); }
+  }
+  Err(last_err.unwrap_or_else(|| "download failed".into()))
 }
 
 #[tauri::command]
