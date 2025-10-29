@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | English
 
-[![Version](https://img.shields.io/badge/version-v0.0.6-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.0.7-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -28,7 +28,7 @@ See the main README for screenshots.
 ## Install
 
 - Download from Releases and run the installer:
-  - Windows: `flymd_0.0.6_x64_setup.exe` (file name may vary per release)
+  - Windows: `flymd_0.0.7_x64_setup.exe` (file name may vary per release)
 - Requirements:
   - Windows 10/11 (x64) or Linux
   - WebView2 Runtime on Windows (usually preinstalled)
@@ -81,11 +81,12 @@ See the main README for screenshots.
 - `Esc` Close Preview / dialogs
 
 
-## Changelog (v0.0.6)
+## Changelog (v0.0.7)
 
-- Restore last read/edit position per file on reopen.
-- Better handling for LaTeX/Mermaid in WYSIWYG mode; avoid premature rendering while typing.
-- UI/UX polish and stability improvements.
+- Library: improved file support and filters (md/markdown/txt/PDF); better UX for open/rename/move/delete.
+- File operations: add Trash integration and force remove APIs to improve safety and recovery.
+- Mermaid: add caching of rendered SVG to reduce flicker and speed up repeated renders.
+- Stability and performance improvements.
 
 
 ## License
@@ -96,4 +97,3 @@ Apache-2.0. See `LICENSE`.
 ## Acknowledgements
 
 - Tauri  •  Markdown‑It  •  DOMPurify  •  highlight.js  •  KaTeX  •  Mermaid
-
