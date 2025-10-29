@@ -1035,6 +1035,35 @@ async function renderPreview() {
         const dotStr = insideFence && !isFenceLine ? '_' : '<span class="caret-dot">_</span>'
         raw = raw.slice(0, injectAt) + dotStr + raw.slice(injectAt)
       }
+      try {
+        const lines = raw.split('\n')
+        let openFenceIdx = -1
+        let openFenceChar = ''
+        for (let i = 0; i < lines.length; i++) {
+          const m = lines[i].match(/^ {0,3}(`{3,}|~{3,})/)
+          if (m) {
+            const ch = m[1][0]
+            if (openFenceIdx < 0) { openFenceIdx = i; openFenceChar = ch }
+            else if (ch === openFenceChar) { openFenceIdx = -1; openFenceChar = '' }
+          }
+        }
+        if (openFenceIdx >= 0) {
+          lines[openFenceIdx] = lines[openFenceIdx].replace(/^(\s*)(`{3,}|~{3,})/, (_all, s: string, fence: string) => {
+            return s + fence[0] + '\u200B' + fence.slice(1)
+          })
+        }
+        let openMathIdx = -1
+        for (let i = 0; i < lines.length; i++) {
+          if (/^ {0,3}\$\$/.test(lines[i])) {
+            if (openMathIdx < 0) openMathIdx = i
+            else openMathIdx = -1
+          }
+        }
+        if (openMathIdx >= 0) {
+          lines[openMathIdx] = lines[openMathIdx].replace(/^(\s*)\$\$/, (_all, s: string) => s + '$\u200B$')
+        }
+        raw = lines.join('\n')
+      } catch {}
     }
   } catch {}
   const html = md!.render(raw)
