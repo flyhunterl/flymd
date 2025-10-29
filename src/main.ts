@@ -41,6 +41,56 @@ let sanitizeHtml: ((html: string, cfg?: any) => string) | null = null
 let katexCssLoaded = false
 let hljsLoaded = false
 let mermaidReady = false
+// Mermaid 渲染缓存（按源代码文本缓存 SVG，避免重复渲染导致布局抖动）
+const mermaidSvgCache = new Map<string, { svg: string; renderId: string }>()
+let mermaidSvgCacheVersion = 0
+
+function hashMermaidCode(code: string): string {
+  try {
+    if (!code) return 'mmd-empty'
+    let hash = 2166136261 >>> 0 // FNV-1a 32 位初始值
+    for (let i = 0; i < code.length; i++) {
+      hash ^= code.charCodeAt(i)
+      hash = Math.imul(hash, 16777619)
+    }
+    return `mmd-${(hash >>> 0).toString(36)}`
+  } catch {
+    return 'mmd-fallback'
+  }
+}
+
+function getCachedMermaidSvg(code: string, desiredId: string): string | null {
+  try {
+    const cached = mermaidSvgCache.get(code)
+    if (!cached || !cached.renderId || !cached.svg) return null
+    if (!cached.svg.includes('<svg')) return null
+    // 将缓存中的旧 ID 替换为当前渲染需要的新 ID，确保 DOM 中 ID 唯一
+    return cached.svg.split(cached.renderId).join(desiredId)
+  } catch {
+    return null
+  }
+}
+
+function cacheMermaidSvg(code: string, svg: string, renderId: string) {
+  try {
+    if (!code || !svg || !renderId) return
+    mermaidSvgCache.set(code, { svg, renderId })
+  } catch {}
+}
+
+function invalidateMermaidSvgCache(reason?: string) {
+  try {
+    mermaidSvgCache.clear()
+    mermaidSvgCacheVersion++
+    console.log('Mermaid 缓存已清空', reason || '')
+  } catch {}
+}
+
+try {
+  if (typeof window !== 'undefined') {
+    ;(window as any).invalidateMermaidSvgCache = invalidateMermaidSvgCache
+  }
+} catch {}
 
 // 应用状态
 let fileTreeReady = false
@@ -1576,27 +1626,41 @@ async function renderPreview() {
       for (let i = 0; i < nodes.length; i++) {
         const el = nodes[i]
         const code = el.textContent || ''
+        const hash = hashMermaidCode(code)
+        const desiredId = `${hash}-${mermaidSvgCacheVersion}-${i}`
         console.log(`渲染 Mermaid 图表 ${i + 1}:`, code.substring(0, 50))
         try {
-          const { svg } = await mermaid.render(`mmd-${Date.now()}-${i}`, code)
-          console.log(`Mermaid 图表 ${i + 1} SVG 长度:`, svg.length)
-          console.log(`Mermaid 图表 ${i + 1} SVG 开头:`, svg.substring(0, 200))
+          let svgMarkup = getCachedMermaidSvg(code, desiredId)
+          let cacheHit = false
+          if (svgMarkup) {
+            cacheHit = true
+            console.log(`Mermaid 图表 ${i + 1} 使用缓存，ID: ${desiredId}`)
+          } else {
+            const renderId = `${hash}-${Date.now()}-${i}`
+            const { svg } = await mermaid.render(renderId, code)
+            cacheMermaidSvg(code, svg, renderId)
+            svgMarkup = svg.split(renderId).join(desiredId)
+            console.log(`Mermaid 图表 ${i + 1} 首次渲染完成，缓存已更新`)
+          }
           const wrap = document.createElement('div')
-          wrap.innerHTML = svg
-          const svgEl = wrap.firstElementChild
+          wrap.innerHTML = svgMarkup || ''
+          const svgEl = wrap.firstElementChild as SVGElement | null
           console.log(`Mermaid 图表 ${i + 1} SVG 元素:`, svgEl?.tagName, svgEl?.getAttribute('viewBox'))
           if (svgEl) {
+            svgEl.setAttribute('data-mmd-hash', hash)
+            svgEl.setAttribute('data-mmd-cache', cacheHit ? 'hit' : 'miss')
+            if (!svgEl.id) svgEl.id = desiredId
             el.replaceWith(svgEl)
-            console.log(`Mermaid 图表 ${i + 1} 渲染成功，已插入 DOM`)
-            // 检查是否还在 DOM 中
+            console.log(`Mermaid 图表 ${i + 1} 已插入 DOM（${cacheHit ? '缓存命中' : '新渲染'}）`)
             setTimeout(() => {
               const check = document.querySelector(`#${svgEl.id}`)
               console.log(`Mermaid 图表 ${i + 1} 检查 DOM 中是否存在:`, check ? '存在' : '不存在')
             }, 100)
+          } else {
+            throw new Error('生成的 SVG 节点为空')
           }
         } catch (err) {
           console.error('Mermaid 单图渲染失败：', err)
-          // 显示错误信息
           el.innerHTML = `<div style="color: red; border: 1px solid red; padding: 10px;">Mermaid 渲染错误: ${err}</div>`
         }
       }
