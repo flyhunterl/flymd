@@ -542,4 +542,17 @@ html, body { overflow: hidden; }
 .container.wysiwyg .preview pre,
 .container.wysiwyg .preview pre code { line-height: 0.8 !important; }
 
+/* WYSIWYG 下的 KaTeX 行内公式在某些字体/缩放下会出现下探溢出，
+   导致与下一行内容视觉重叠。仅在所见模式中为 .katex 增加少量底部留白，
+   同时提高其行高参与行盒计算，避免与后续文本叠压。*/
+.container.wysiwyg .preview .katex {
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: 1.2;          /* 提高自身行高，参与行盒最大值计算 */
+  padding-bottom: 0.2em;     /* 增加下边距，给根号等下探元素留出余量 */
+}
+.container.wysiwyg .preview .katex-display { /* 块级公式也稍作留白，防止与段落挤在一起 */
+  margin: 0.6em 0;
+}
+
 

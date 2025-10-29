@@ -539,6 +539,75 @@ function autoNewlineAfterBackticksInWysiwyg() {
   } catch {}
 }
 
+// 所见模式：行内数学 $...$ 闭合后，自动在光标处后插入至少 2 个换行，避免新内容与公式渲染重叠
+function autoNewlineAfterInlineDollarInWysiwyg() {
+  try {
+    if (!wysiwyg) return
+    const pos = editor.selectionStart >>> 0
+    if (pos < 1) return
+    const v = editor.value
+    // 仅在最新输入字符为 $ 时判定
+    if (v[pos - 1] !== '$') return
+    // 若是 $$（块级），不处理
+    if (pos >= 2 && v[pos - 2] === '$') return
+
+    // 判断是否在代码围栏内，是则不处理
+    const before = v.slice(0, pos)
+    const lineStart = before.lastIndexOf('\n') + 1
+    const fenceRE = /^ {0,3}(```+|~~~+)/
+    const preText = v.slice(0, lineStart)
+    const preLines = preText.split('\n')
+    let insideFence = false
+    let fenceCh = ''
+    for (const ln of preLines) {
+      const m = ln.match(fenceRE)
+      if (m) {
+        const ch = m[1][0]
+        if (!insideFence) { insideFence = true; fenceCh = ch }
+        else if (ch === fenceCh) { insideFence = false; fenceCh = '' }
+      }
+    }
+    if (insideFence) return
+
+    // 当前整行（用于检测行内 $ 奇偶）
+    const lineEnd = (() => { const i = v.indexOf('\n', lineStart); return i < 0 ? v.length : i })()
+    const line = v.slice(lineStart, lineEnd)
+    const upto = v.slice(lineStart, pos) // 行首到光标（含刚输入的 $）
+
+    // 统计“未被转义、且不是 $$ 的单个 $”数量
+    let singles = 0
+    let lastIdx = -1
+    for (let i = 0; i < upto.length; i++) {
+      if (upto[i] !== '$') continue
+      // 跳过 $$（块级）
+      if (i + 1 < upto.length && upto[i + 1] === '$') { i++; continue }
+      // 跳过转义 \$（奇数个反斜杠）
+      let bs = 0
+      for (let j = i - 1; j >= 0 && upto[j] === '\\'; j--) bs++
+      if ((bs & 1) === 1) continue
+      singles++
+      lastIdx = i
+    }
+
+    // 若刚好闭合（奇->偶）且最后一个单 $ 就是刚输入的这个
+    if (singles % 2 === 0 && lastIdx === upto.length - 1) {
+      // 仅在当前位置之后补足至少 2 个换行
+      let have = 0
+      for (let i = pos; i < v.length && i < pos + 3; i++) { if (v[i] === '\n') have++; else break }
+      const need = Math.max(0, 3 - have)
+      if (need > 0) {
+        const ins = '\n'.repeat(need)
+        editor.value = v.slice(0, pos) + ins + v.slice(pos)
+        const newPos = pos + ins.length
+        editor.selectionStart = editor.selectionEnd = newPos
+        dirty = true
+        refreshTitle()
+        refreshStatus()
+      }
+    }
+  } catch {}
+}
+
 // 动态添加"最近文件"菜单项
 const menubar = document.querySelector('.menubar') as HTMLDivElement
 if (menubar) {
@@ -952,6 +1021,7 @@ async function ensureRenderer() {
     md = new MarkdownItCtor({
       html: true,
       linkify: true,
+      breaks: true, // 单个换行渲染为 <br>，与所见模式的“回车即提行”保持一致
       highlight(code, lang) {
         // Mermaid 代码块保留为占位容器，稍后由 mermaid 渲染
         if (lang && lang.toLowerCase() === 'mermaid') {
@@ -1062,6 +1132,32 @@ async function renderPreview() {
         if (openMathIdx >= 0) {
           lines[openMathIdx] = lines[openMathIdx].replace(/^(\s*)\$\$/, (_all, s: string) => s + '$\u200B$')
         }
+
+        // 3) 当前行：未闭合的单个 $（行内数学）
+        try {
+          if (!insideFence && !isFenceLine) {
+            const curIdx = (() => { try { return before.split('\n').length - 1 } catch { return -1 } })()
+            if (curIdx >= 0 && curIdx < lines.length) {
+              const line = lines[curIdx]
+              const singlePos: number[] = []
+              for (let i = 0; i < line.length; i++) {
+                if (line[i] !== '$') continue
+                // 跳过 $$（块级）
+                if (i + 1 < line.length && line[i + 1] === '$') { i++; continue }
+                // 跳过转义 \$（奇数个反斜杠）
+                let bs = 0
+                for (let j = i - 1; j >= 0 && line[j] === '\\'; j--) bs++
+                if ((bs & 1) === 1) continue
+                singlePos.push(i)
+              }
+              if ((singlePos.length & 1) === 1) {
+                const idx = singlePos[singlePos.length - 1]
+                // 在单个 $ 后插入零宽字符，阻断 markdown-it-katex 的行内渲染识别
+                lines[curIdx] = line.slice(0, idx + 1) + '\u200B' + line.slice(idx + 1)
+              }
+            }
+          }
+        } catch {}
         raw = lines.join('\n')
       } catch {}
     }
@@ -2457,7 +2553,7 @@ function bindEvents() {
   if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
 
   // 所见模式：输入/合成结束/滚动时联动渲染与同步
-  editor.addEventListener('input', () => { if (wysiwyg) { autoNewlineAfterBackticksInWysiwyg(); if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('input', () => { if (wysiwyg) { autoNewlineAfterBackticksInWysiwyg(); autoNewlineAfterInlineDollarInWysiwyg(); if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
   editor.addEventListener('compositionend', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
   editor.addEventListener('scroll', () => { if (wysiwyg) { syncScrollEditorToPreview(); updateWysiwygCaretDot() } scheduleSaveDocPos() })
   editor.addEventListener('keyup', (e) => { if (wysiwyg) { if (wysiwygEnterToRenderOnly && e.key === 'Enter') scheduleWysiwygRender(); else void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
