@@ -1,7 +1,7 @@
 # 飞速MarkDown【flyMD】
 
 
-> 多平台 专注写作 极致简洁 即开即用
+> 多平台支持  专注写作 极致性能 即开即用 所见即所得
 
 [![Version](https://img.shields.io/badge/version-0.0.6--beta-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
