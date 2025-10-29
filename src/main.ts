@@ -54,6 +54,8 @@ let wysiwygLineEl: HTMLDivElement | null = null
 // 点状光标元素与度量缓存
 let wysiwygCaretEl: HTMLDivElement | null = null
 let wysiwygStatusEl: HTMLDivElement | null = null
+let _wysiwygCaretLineIndex = 0
+let _wysiwygCaretVisualColumn = 0
 let _caretCharWidth = 0
 let _caretFontKey = ''
 // 点状“光标”闪烁控制（仅所见模式预览中的点）
@@ -458,6 +460,7 @@ function updateWysiwygLineHighlight() {
     const st = editor.selectionStart >>> 0
     const before = editor.value.slice(0, st)
     const lineIdx = before.split('\n').length - 1
+    _wysiwygCaretLineIndex = lineIdx
     const style = window.getComputedStyle(editor)
     let lh = parseFloat(style.lineHeight || '')
     if (!lh || Number.isNaN(lh)) {
@@ -489,12 +492,89 @@ function measureCharWidth(): number {
   } catch { return _caretCharWidth || 8 }
 }
 
+// ����ģʽ������Ҫ�����滬���ƶ���꣬�������ƶ����еļ�����λ���ĳߴ硣
+function advanceVisualColumn(column: number, code: number): number {
+  if (code === 13 /* \r */) return column
+  if (code === 9 /* \t */) {
+    const modulo = column % 4
+    const step = modulo === 0 ? 4 : 4 - modulo
+    return column + step
+  }
+  return column + 1
+}
+
+function calcVisualColumn(segment: string): number {
+  let col = 0
+  for (let i = 0; i < segment.length; i++) {
+    col = advanceVisualColumn(col, segment.charCodeAt(i))
+  }
+  return col
+}
+
+function offsetForVisualColumn(line: string, column: number): number {
+  if (!Number.isFinite(column) || column <= 0) return 0
+  let col = 0
+  for (let i = 0; i < line.length; i++) {
+    const code = line.charCodeAt(i)
+    const next = advanceVisualColumn(col, code)
+    if (next >= column) return i + 1
+    col = next
+  }
+  return line.length
+}
+
+function moveWysiwygCaretByLines(deltaLines: number, preferredColumn?: number): number {
+  try {
+    if (!wysiwyg) return 0
+    if (!Number.isFinite(deltaLines) || deltaLines === 0) return 0
+    if (editor.selectionStart !== editor.selectionEnd) return 0
+    const value = editor.value
+    if (!value) return 0
+    const len = value.length
+    let pos = editor.selectionStart >>> 0
+    let lineStart = pos
+    while (lineStart > 0 && value.charCodeAt(lineStart - 1) !== 10) lineStart--
+    const currentSegment = value.slice(lineStart, pos)
+    let column = Number.isFinite(preferredColumn) ? Number(preferredColumn) : calcVisualColumn(currentSegment)
+    if (!Number.isFinite(column) || column < 0) column = 0
+    const steps = deltaLines > 0 ? Math.floor(deltaLines) : Math.ceil(deltaLines)
+    if (steps === 0) return 0
+    let moved = 0
+    if (steps > 0) {
+      let remaining = steps
+      while (remaining > 0) {
+        const nextNl = value.indexOf('\n', lineStart)
+        if (nextNl < 0) { lineStart = len; break }
+        lineStart = nextNl + 1
+        moved++
+        remaining--
+      }
+    } else {
+      let remaining = steps
+      while (remaining < 0) {
+        if (lineStart <= 0) { lineStart = 0; break }
+        const prevNl = value.lastIndexOf('\n', Math.max(0, lineStart - 2))
+        lineStart = prevNl >= 0 ? prevNl + 1 : 0
+        moved--
+        remaining++
+      }
+    }
+    if (moved === 0) return 0
+    let lineEnd = value.indexOf('\n', lineStart)
+    if (lineEnd < 0) lineEnd = len
+    const targetLine = value.slice(lineStart, lineEnd)
+    const offset = offsetForVisualColumn(targetLine, column)
+    const newPos = lineStart + offset
+    editor.selectionStart = editor.selectionEnd = newPos
+    return moved
+  } catch { return 0 }
+}
+
 function updateWysiwygCaretDot() {
   try {
     if (!wysiwyg || !wysiwygCaretEl) return
     // 方案A：使用原生系统光标，禁用自定义覆盖光标
     try { wysiwygCaretEl.classList.remove('show') } catch {}
-    return
     const st = editor.selectionStart >>> 0
     const before = editor.value.slice(0, st)
     const style = window.getComputedStyle(editor)
@@ -510,6 +590,7 @@ function updateWysiwygCaretDot() {
     // 制表符按 4 个空格估算
     const tab4 = (s: string) => s.replace(/\t/g, '    ')
     const colLen = tab4(colStr).length
+    _wysiwygCaretVisualColumn = colLen
     const ch = measureCharWidth()
     const top = Math.max(0, Math.round(padTop + lineIdx * lh - editor.scrollTop))
     const left = Math.max(0, Math.round(padLeft + colLen * ch - editor.scrollLeft))
@@ -688,14 +769,45 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
     const handleWysiwygWheel = (e: WheelEvent) => {
       if (!wysiwyg) return
       try {
-        e.preventDefault()
-        const dy = e.deltaY || 0
+        const rawDelta = Number.isFinite(e.deltaY) ? e.deltaY : 0
+        if (rawDelta === 0) return
+        const style = window.getComputedStyle(editor)
+        const fallbackFontSize = parseFloat(style.fontSize || '14') || 14
+        const rawLineHeight = parseFloat(style.lineHeight || '')
+        const lineHeight = Number.isFinite(rawLineHeight) && rawLineHeight > 0 ? rawLineHeight : fallbackFontSize * 1.6
+        const padTop = parseFloat(style.paddingTop || '0') || 0
+        let dy = rawDelta
+        if (e.deltaMode === 1 /* WheelEvent.DOM_DELTA_LINE */) {
+          dy *= lineHeight || 16
+        } else if (e.deltaMode === 2 /* WheelEvent.DOM_DELTA_PAGE */) {
+          dy *= editor.clientHeight || window.innerHeight || 400
+        }
+        if (!Number.isFinite(dy) || dy === 0) return
         const max = Math.max(0, editor.scrollHeight - editor.clientHeight)
-        const next = Math.max(0, Math.min(max, (editor.scrollTop >>> 0) + dy))
-        if (next !== editor.scrollTop) {
-          editor.scrollTop = next
-          syncScrollEditorToPreview()
-          try { ensureWysiwygCaretDotInView() } catch {}
+        const currentTop = editor.scrollTop || 0
+        const next = Math.max(0, Math.min(max, currentTop + dy))
+        if (Math.abs(next - currentTop) < 0.1) return
+        e.preventDefault()
+        editor.scrollTop = next
+        syncScrollEditorToPreview()
+        let caretAdjusted = false
+        if (editor.selectionStart === editor.selectionEnd) {
+          const lineHeightPx = lineHeight || 16
+          const targetLine = Math.max(0, Math.floor((next - padTop) / lineHeightPx))
+          const diff = targetLine - _wysiwygCaretLineIndex
+          if (diff !== 0) {
+            const moved = moveWysiwygCaretByLines(diff, _wysiwygCaretVisualColumn)
+            if (moved !== 0) {
+              _wysiwygCaretLineIndex += moved
+              caretAdjusted = true
+            }
+          }
+        }
+        updateWysiwygLineHighlight()
+        updateWysiwygCaretDot()
+        startDotBlink()
+        if (caretAdjusted && !wysiwygEnterToRenderOnly) {
+          scheduleWysiwygRender()
         }
       } catch {}
     }
