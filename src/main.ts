@@ -49,6 +49,13 @@ let wysiwyg = false
 let _wysiwygRaf = 0
 // 仅在按回车时触发渲染（可选开关，默认关闭）
 let wysiwygEnterToRenderOnly = false
+// 所见模式：针对行内 $ 与 代码围栏 ``` 的“闭合后需回车再渲染”延迟标记
+let wysiwygHoldInlineDollarUntilEnter = false
+let wysiwygHoldFenceUntilEnter = false
+
+function shouldDeferWysiwygRender(): boolean {
+  return !!(wysiwygEnterToRenderOnly || wysiwygHoldInlineDollarUntilEnter || wysiwygHoldFenceUntilEnter)
+}
 // 当前行高亮元素
 let wysiwygLineEl: HTMLDivElement | null = null
 // 点状光标元素与度量缓存
@@ -407,7 +414,7 @@ function syncScrollEditorToPreview() {
 function scheduleWysiwygRender() {
   try {
     if (!wysiwyg) return
-    if (wysiwygEnterToRenderOnly) { updateWysiwygLineHighlight(); return }
+    if (shouldDeferWysiwygRender()) { updateWysiwygLineHighlight(); return }
     if (_wysiwygRaf) cancelAnimationFrame(_wysiwygRaf)
     _wysiwygRaf = requestAnimationFrame(async () => {
       try { await renderPreview() } catch {}
@@ -425,6 +432,9 @@ async function setWysiwygEnabled(enable: boolean) {
     const container = document.querySelector('.container') as HTMLDivElement | null
     if (container) container.classList.toggle('wysiwyg', wysiwyg)
   if (wysiwyg) {
+      // 进入所见模式时，清理一次延迟标记，避免历史状态影响
+      wysiwygHoldInlineDollarUntilEnter = false
+      wysiwygHoldFenceUntilEnter = false
       // 使用点状光标替代系统竖线光标
       try { if (container) container.classList.add('no-caret') } catch {}
       try { preview.classList.remove('hidden') } catch {}
@@ -440,6 +450,9 @@ async function setWysiwygEnabled(enable: boolean) {
       try { if (wysiwygStatusEl) wysiwygStatusEl.classList.remove('show') } catch {}
       if (wysiwygLineEl) wysiwygLineEl.classList.remove('show')
       if (wysiwygCaretEl) wysiwygCaretEl.classList.remove('show')
+      // 退出所见模式时清理延迟标记
+      wysiwygHoldInlineDollarUntilEnter = false
+      wysiwygHoldFenceUntilEnter = false
       stopDotBlink()
     }
     // 更新按钮提示
@@ -637,13 +650,38 @@ function autoNewlineAfterBackticksInWysiwyg() {
     const pos = editor.selectionStart >>> 0
     if (pos < 3) return
     const last3 = editor.value.slice(pos - 3, pos)
-    if (last3 === '```') {
+    if (last3 === '```' || last3 === '~~~') {
       const v = editor.value
+      // 判断是否为“闭合围栏”：需要位于行首（至多 3 个空格）并且之前处于围栏内部，且围栏字符一致
+      const before = v.slice(0, pos)
+      const lineStart = before.lastIndexOf('\n') + 1
+      const curLine = before.slice(lineStart)
+      const fenceRE = /^ {0,3}(```+|~~~+)/
+      const preText = v.slice(0, lineStart)
+      const preLines = preText.split('\n')
+      let insideFence = false
+      let fenceCh = ''
+      for (const ln of preLines) {
+        const m = ln.match(fenceRE)
+        if (m) {
+          const ch = m[1][0]
+          if (!insideFence) { insideFence = true; fenceCh = ch }
+          else if (ch === fenceCh) { insideFence = false; fenceCh = '' }
+        }
+      }
+      const m2 = curLine.match(fenceRE)
+      const isClosing = !!(m2 && insideFence && m2[1][0] === last3[0])
+
       // 在光标处插入换行，但将光标保持在换行前，便于继续输入语言标识（如 ```js\n）
-        editor.value = v.slice(0, pos) + '\n' + v.slice(pos)
-        editor.selectionStart = editor.selectionEnd = pos
+      editor.value = v.slice(0, pos) + '\n' + v.slice(pos)
+      editor.selectionStart = editor.selectionEnd = pos
       dirty = true
       refreshTitle()
+
+      // 若检测到闭合，则开启“需回车再渲染”的围栏延迟
+      if (isClosing) {
+        wysiwygHoldFenceUntilEnter = true
+      }
     }
   } catch {}
 }
@@ -700,6 +738,8 @@ function autoNewlineAfterInlineDollarInWysiwyg() {
 
     // 若刚好闭合（奇->偶）且最后一个单 $ 就是刚输入的这个
     if (singles % 2 === 0 && lastIdx === upto.length - 1) {
+      // 行内数学已闭合：延迟渲染，待用户按下回车键后再渲染
+      wysiwygHoldInlineDollarUntilEnter = true
       // 仅在当前位置之后补足至少 2 个换行
       let have = 0
       for (let i = pos; i < v.length && i < pos + 3; i++) { if (v[i] === '\n') have++; else break }
@@ -2714,11 +2754,11 @@ function bindEvents() {
   if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
 
   // 所见模式：输入/合成结束/滚动时联动渲染与同步
-  editor.addEventListener('input', () => { if (wysiwyg) { autoNewlineAfterBackticksInWysiwyg(); autoNewlineAfterInlineDollarInWysiwyg(); if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
-  editor.addEventListener('compositionend', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('input', () => { if (wysiwyg) { autoNewlineAfterBackticksInWysiwyg(); autoNewlineAfterInlineDollarInWysiwyg(); if (!shouldDeferWysiwygRender()) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('compositionend', () => { if (wysiwyg) { if (!shouldDeferWysiwygRender()) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
   editor.addEventListener('scroll', () => { if (wysiwyg) { syncScrollEditorToPreview(); try { ensureWysiwygCaretDotInView() } catch {}; updateWysiwygCaretDot() } scheduleSaveDocPos() })
-  editor.addEventListener('keyup', (e) => { if (wysiwyg) { if (wysiwygEnterToRenderOnly && e.key === 'Enter') scheduleWysiwygRender(); else void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
-  editor.addEventListener('click', () => { if (wysiwyg) { void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('keyup', (e) => { if (wysiwyg) { if ((shouldDeferWysiwygRender()) && e.key === 'Enter') { wysiwygHoldInlineDollarUntilEnter = false; wysiwygHoldFenceUntilEnter = false; scheduleWysiwygRender() } else if (!shouldDeferWysiwygRender()) { void renderPreview() } updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('click', () => { if (wysiwyg) { if (!shouldDeferWysiwygRender()) void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
 
   // 预览滚动也记录阅读位置
   preview.addEventListener('scroll', () => { scheduleSaveDocPos() })
