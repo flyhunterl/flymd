@@ -2293,7 +2293,8 @@ async function pickLibraryRoot(): Promise<string | null> {
 }
 
 // 支持的文档后缀判断（库侧栏）
-function isSupportedDoc(name: string): boolean { return /\.(md|markdown|txt|pdf)$/i.test(name) }
+// 注意：按需求仅允许三种后缀：md / txt / pdf
+function isSupportedDoc(name: string): boolean { return /\.(md|txt|pdf)$/i.test(name) }
 
 // 目录递归包含受支持文档的缓存
 const libHasDocCache = new Map<string, boolean>()

@@ -30,6 +30,10 @@ const state = {
   unwatch: null as null | (() => void),
 }
 
+// 目录递归包含受支持文档的缓存
+const hasDocCache = new Map<string, boolean>()
+const hasDocPending = new Map<string, Promise<boolean>>()
+
 function sep(p: string): string { return p.includes('\\') ? '\\' : '/' }
 function norm(p: string): string { return p.replace(/[\\/]+/g, sep(p)) }
 function join(a: string, b: string): string { const s = sep(a); return (a.endsWith(s) ? a : a + s) + b }
@@ -85,14 +89,17 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
   let ents: any[] = []
   try { ents = await readDir(dir, { recursive: false } as any) as any[] } catch { ents = [] }
   const dirs: any[] = []
-  // 仅展示指定后缀的文档
-  const allow = new Set(['md', 'markdown', 'txt', 'pdf'])
+  // 仅展示指定后缀的文档（严格三种：md / txt / pdf）
+  const allow = new Set(['md', 'txt', 'pdf'])
   for (const it of ents) {
     const p: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
     let isDir = false
     try { isDir = !!(await stat(p) as any)?.isDirectory } catch { isDir = false }
     if (isDir) {
-      dirs.push({ name: nameOf(p), path: p, isDir: true })
+      // 仅保留“包含受支持文档(递归)”的目录
+      if (await dirHasSupportedDocRecursive(p, allow)) {
+        dirs.push({ name: nameOf(p), path: p, isDir: true })
+      }
     } else {
       const nm = nameOf(p)
       const ext = (nm.split('.').pop() || '').toLowerCase()
@@ -102,6 +109,47 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
   dirs.sort((a, b) => a.name.localeCompare(b.name))
   items.sort((a, b) => a.name.localeCompare(b.name))
   return [...dirs, ...items]
+}
+
+// 递归判断目录是否包含受支持文档（带缓存）
+async function dirHasSupportedDocRecursive(dir: string, allow: Set<string>, depth = 20): Promise<boolean> {
+  try {
+    if (hasDocCache.has(dir)) return hasDocCache.get(dir) as boolean
+    if (hasDocPending.has(dir)) return await (hasDocPending.get(dir) as Promise<boolean>)
+
+    const p = (async (): Promise<boolean> => {
+      if (depth <= 0) { hasDocCache.set(dir, false); return false }
+      let entries: any[] = []
+      try { entries = await readDir(dir, { recursive: false } as any) as any[] } catch { entries = [] }
+      // 先扫描本层文件
+      for (const it of (entries || [])) {
+        const full: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
+        let isDir = false
+        try { isDir = !!(await stat(full) as any)?.isDirectory } catch { isDir = false }
+        if (!isDir) {
+          const nm = nameOf(full)
+          const ext = (nm.split('.').pop() || '').toLowerCase()
+          if (allow.has(ext)) { hasDocCache.set(dir, true); return true }
+        }
+      }
+      // 再递归子目录
+      for (const it of (entries || [])) {
+        const full: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
+        let isDir = false
+        try { isDir = !!(await stat(full) as any)?.isDirectory } catch { isDir = false }
+        if (isDir) {
+          const ok = await dirHasSupportedDocRecursive(full, allow, depth - 1)
+          if (ok) { hasDocCache.set(dir, true); return true }
+        }
+      }
+      hasDocCache.set(dir, false)
+      return false
+    })()
+    hasDocPending.set(dir, p)
+    const r = await p
+    hasDocPending.delete(dir)
+    return r
+  } catch { return false }
 }
 
 function makeTg(): HTMLElement { const s = document.createElementNS('http://www.w3.org/2000/svg','svg'); s.setAttribute('viewBox','0 0 24 24'); s.classList.add('lib-tg'); const p=document.createElementNS('http://www.w3.org/2000/svg','path'); p.setAttribute('d','M9 6l6 6-6 6'); s.appendChild(p); return s as any }
@@ -279,6 +327,8 @@ async function renderRoot(root: string) {
 async function refresh() {
   const root = await state.opts!.getRoot()
   if (!root) { if (state.container) state.container.innerHTML = '<div class="lib-empty">尚未选择库目录</div>'; return }
+  // 刷新前清理目录缓存，确保显示与实际文件状态一致
+  try { hasDocCache.clear(); hasDocPending.clear() } catch {}
   await renderRoot(root)
 }
 
