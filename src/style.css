@@ -60,6 +60,7 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
   border: none;
   background: transparent;
   transition: background-color 0.1s;
+  position: relative; /* 便于放置红点提示 */
 }
 
 .menu-item:hover {
@@ -68,6 +69,19 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 
 .menu-item:active {
   background: rgba(127,127,127,0.18);
+}
+
+/* 更新红点提示：为有更新的菜单项显示小圆点 */
+.menu-item.has-update::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e11d48; /* 玫瑰红 */
+  box-shadow: 0 0 0 2px var(--bg);
 }
 
 .titlebar .filename {
@@ -538,6 +552,9 @@ html, body { overflow: hidden; }
 
 /* 所见模式：覆盖预览背景为专用色 */
 .container.wysiwyg .preview { background: var(--wysiwyg-bg); }
+
+/* 所见模式下渲染中：隐藏预览层，避免原始 mermaid 代码短暂闪现 */
+.container.wysiwyg .preview.rendering { visibility: hidden; }
 
 
 

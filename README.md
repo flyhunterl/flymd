@@ -5,7 +5,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.0.6-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.0.7-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -123,9 +123,16 @@
 
 ## 🗺️ 路线图
 
+## 更新 v.0.07
+- 新增：文件库自定义排序
+- 新增：文件库隐藏md/txt/pdf/markdown以外的文件
+- 新增：更新检测和下载功能
+- 优化：为mermaid图标增加缓存
+
+
 ## 更新 v0.0.6-fix
 - 修复：所见模式编辑到最下方时，无法聚焦输入框的问题
-- 优化: 所见模式滚动逻辑
+- 优化:   所见模式滚动逻辑
 - 已知：所见模式中如果存在视野内的mermaid 后续输入文字会导致界面闪烁
 
 ## 更新 v0.0.6

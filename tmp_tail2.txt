@@ -1,0 +1,20 @@
+  .map_err(|e| format!("join error: {e}"))??;
+  Ok(())
+}
+
+#[tauri::command]
+async fn force_remove_path(path: String) -> Result<(), String> {
+  use std::fs;
+  use std::path::PathBuf;
+  let pathbuf = PathBuf::from(path);
+  tauri::async_runtime::spawn_blocking(move || {
+    if pathbuf.is_dir() {
+      fs::remove_dir_all(&pathbuf).map_err(|e| format!("remove_dir_all error: {e}"))
+    } else {
+      fs::remove_file(&pathbuf).map_err(|e| format!("remove_file error: {e}"))
+    }
+  })
+  .await
+  .map_err(|e| format!("join error: {e}"))??;
+  Ok(())
+}

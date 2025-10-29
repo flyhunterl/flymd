@@ -18,6 +18,8 @@ import { open, save, ask } from '@tauri-apps/plugin-dialog'
 import { readTextFile, writeTextFile, readDir, stat, readFile, mkdir  , rename, remove, writeFile, exists, copyFile } from '@tauri-apps/plugin-fs'
 import { Store } from '@tauri-apps/plugin-store'
 import { open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
+// Tauri v2 插件 opener 的导出为 openUrl / openPath，不再是 open
+import { openUrl, openPath } from '@tauri-apps/plugin-opener'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
@@ -47,6 +49,37 @@ let mermaidSvgCacheVersion = 0
 
 function hashMermaidCode(code: string): string {
   try {
+    // WYSIWYG 情况下，在编辑未闭合的 ```mermaid 围栏内时，跳过 Mermaid 渲染以避免每次输入导致整屏重排/闪烁
+    const _skipMermaid = (() => {
+      if (!wysiwyg) return false
+      try {
+        const text = editor.value
+        const caret = editor.selectionStart >>> 0
+        const lines = text.split('\n')
+        const caretLine = (() => { try { return text.slice(0, caret).split('\n').length - 1 } catch { return -1 } })()
+        let inside = false
+        let fenceCh = ''
+        let fenceLang = ''
+        for (let i = 0; i <= Math.min(Math.max(0, caretLine), lines.length - 1); i++) {
+          const ln = lines[i]
+          const m = ln.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+          if (m) {
+            const ch = m[1][0]
+            if (!inside) {
+              inside = true
+              fenceCh = ch
+              fenceLang = (m[2] || '').trim().split(/\s+/)[0]?.toLowerCase() || ''
+            } else if (ch === fenceCh) {
+              inside = false
+              fenceCh = ''
+              fenceLang = ''
+            }
+          }
+        }
+        return !!(inside && fenceLang === 'mermaid')
+      } catch { return false }
+    })()
+    if (_skipMermaid) { throw new Error('SKIP_MERMAID_RENDER_IN_WYSIWYG') }
     if (!code) return 'mmd-empty'
     let hash = 2166136261 >>> 0 // FNV-1a 32 位初始值
     for (let i = 0; i < code.length; i++) {
@@ -875,6 +908,13 @@ if (menubar) {
   aboutBtn.title = '关于'
       aboutBtn.textContent = '\u5173\u4e8e'
       menubar.appendChild(wBtn)
+      // 检查更新按钮
+      const updBtn = document.createElement('div')
+      updBtn.id = 'btn-update'
+      updBtn.className = 'menu-item'
+      updBtn.title = '检查更新'
+      updBtn.textContent = '\u66f4\u65b0'
+      menubar.appendChild(updBtn)
       menubar.appendChild(aboutBtn)
 }
 const containerEl = document.querySelector('.container') as HTMLDivElement
@@ -1484,6 +1524,74 @@ async function renderPreview() {
   // 包裹一层容器，用于样式定宽居中显示
   preview.innerHTML = `<div class="preview-body">${safe}</div>`
   try { decorateCodeBlocks(preview) } catch {}
+  // WYSIWYG 防闪烁：使用离屏容器完成 Mermaid 替换后一次性提交
+  try {
+    preview.classList.add('rendering')
+    const buf = document.createElement('div') as HTMLDivElement
+    buf.className = 'preview-body'
+    buf.innerHTML = safe
+    try {
+      const codeBlocks = buf.querySelectorAll('pre > code.language-mermaid') as NodeListOf<HTMLElement>
+      codeBlocks.forEach((code) => {
+        try {
+          const pre = code.parentElement as HTMLElement
+          const text = code.textContent || ''
+          const div = document.createElement('div')
+          div.className = 'mermaid'
+          div.textContent = text
+          pre.replaceWith(div)
+        } catch {}
+      })
+    } catch {}
+    try {
+      const preMermaid = buf.querySelectorAll('pre.mermaid')
+      preMermaid.forEach((pre) => {
+        try {
+          const text = pre.textContent || ''
+          const div = document.createElement('div')
+          div.className = 'mermaid'
+          div.textContent = text
+          pre.replaceWith(div)
+        } catch {}
+      })
+    } catch {}
+    try {
+      const nodes = Array.from(buf.querySelectorAll('.mermaid')) as HTMLElement[]
+      if (nodes.length > 0) {
+        let mermaid: any
+        try { mermaid = (await import('mermaid')).default } catch (e1) { try { mermaid = (await import('mermaid/dist/mermaid.esm.mjs')).default } catch (e2) { throw e2 } }
+        if (!mermaidReady) { mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' }); mermaidReady = true }
+        for (let i = 0; i < nodes.length; i++) {
+          const el = nodes[i]
+          const code = el.textContent || ''
+          const hash = hashMermaidCode(code)
+          const desiredId = `${hash}-${mermaidSvgCacheVersion}-${i}`
+          try {
+            let svgMarkup = getCachedMermaidSvg(code, desiredId)
+            if (!svgMarkup) {
+              const renderId = `${hash}-${Date.now()}-${i}`
+              const { svg } = await mermaid.render(renderId, code)
+              cacheMermaidSvg(code, svg, renderId)
+              svgMarkup = svg.split(renderId).join(desiredId)
+            }
+            const wrap = document.createElement('div')
+            wrap.innerHTML = svgMarkup || ''
+            const svgEl = wrap.firstElementChild as SVGElement | null
+            if (svgEl) {
+              if (!svgEl.id) svgEl.id = desiredId
+              el.replaceWith(svgEl)
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+    // 一次性替换预览 DOM
+    try {
+      preview.innerHTML = ''
+      preview.appendChild(buf)
+      try { decorateCodeBlocks(preview) } catch {}
+    } catch {}
+  } catch {} finally { try { preview.classList.remove('rendering') } catch {} }
   // 所见模式下，确保“模拟光标 _”在预览区可见
   try { if (wysiwyg) ensureWysiwygCaretDotInView() } catch {}
   // 外链安全属性
@@ -1802,6 +1910,147 @@ function isTauriRuntime(): boolean {
     // @ts-ignore
     return typeof window !== 'undefined' && (!!(window as any).__TAURI_INTERNALS__ || !!(window as any).__TAURI__)
   } catch { return false }
+}
+
+// 更新检测：类型声明（仅用于提示，不强制）
+type UpdateAssetInfo = {
+  name: string
+  size: number
+  directUrl: string
+  proxyUrl: string
+}
+type CheckUpdateResp = {
+  hasUpdate: boolean
+  current: string
+  latest: string
+  releaseName: string
+  notes: string
+  htmlUrl: string
+  assetWin?: UpdateAssetInfo | null
+  assetLinuxAppimage?: UpdateAssetInfo | null
+  assetLinuxDeb?: UpdateAssetInfo | null
+}
+
+async function openInBrowser(url: string) {
+  try {
+    if (isTauriRuntime()) { await openUrl(url) }
+    else { window.open(url, '_blank', 'noopener,noreferrer') }
+  } catch {
+    try { window.open(url, '_blank', 'noopener,noreferrer') } catch {}
+  }
+}
+
+function upMsg(s: string) {
+  try { status.textContent = s } catch {}
+  try { logInfo('[更新] ' + s) } catch {}
+}
+
+function setUpdateBadge(on: boolean, tip?: string) {
+  try {
+    const btn = document.getElementById('btn-update') as HTMLDivElement | null
+    if (!btn) return
+    if (on) {
+      btn.classList.add('has-update')
+      if (tip) btn.title = tip
+    } else {
+      btn.classList.remove('has-update')
+    }
+  } catch {}
+}
+
+function ensureUpdateOverlay(): HTMLDivElement {
+  const id = 'update-overlay'
+  let ov = document.getElementById(id) as HTMLDivElement | null
+  if (ov) return ov
+  const div = document.createElement('div')
+  div.id = id
+  div.className = 'link-overlay hidden'
+  div.innerHTML = `
+    <div class="link-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title">
+      <div class="link-header">
+        <div id="update-title">检查更新</div>
+        <button id="update-close" class="about-close" title="关闭">×</button>
+      </div>
+      <div class="link-body" id="update-body"></div>
+      <div class="link-actions" id="update-actions"></div>
+    </div>
+  `
+  const container = document.querySelector('.container') as HTMLDivElement | null
+  if (container) container.appendChild(div)
+  const btn = div.querySelector('#update-close') as HTMLButtonElement | null
+  if (btn) btn.addEventListener('click', () => div.classList.add('hidden'))
+  return div
+}
+
+function showUpdateOverlayLinux(resp: CheckUpdateResp) {
+  const ov = ensureUpdateOverlay()
+  const body = ov.querySelector('#update-body') as HTMLDivElement
+  const act = ov.querySelector('#update-actions') as HTMLDivElement
+  body.innerHTML = `
+    <div style="margin-bottom:8px;">发现新版本：<b>${resp.latest}</b>（当前：${resp.current}）</div>
+    <div style="white-space:pre-wrap;max-height:240px;overflow:auto;border:1px solid var(--fg-muted);padding:8px;border-radius:6px;">${(resp.notes||'').replace(/</g,'&lt;')}</div>
+  `
+  act.innerHTML = ''
+  const mkBtn = (label: string, onClick: () => void) => {
+    const b = document.createElement('button')
+    b.textContent = label
+    b.addEventListener('click', onClick)
+    act.appendChild(b)
+    return b
+  }
+  if (resp.assetLinuxAppimage) {
+    mkBtn('下载 AppImage（代理）', () => { void openInBrowser(resp.assetLinuxAppimage!.proxyUrl) })
+  }
+  if (resp.assetLinuxDeb) {
+    mkBtn('下载 DEB（代理）', () => { void openInBrowser(resp.assetLinuxDeb!.proxyUrl) })
+  }
+  mkBtn('前往发布页', () => { void openInBrowser(resp.htmlUrl) })
+  mkBtn('关闭', () => ov.classList.add('hidden'))
+  ov.classList.remove('hidden')
+}
+
+async function checkUpdateInteractive() {
+  try {
+    upMsg('正在检查更新…')
+    const resp = await invoke('check_update', { force: true, include_prerelease: false }) as any as CheckUpdateResp
+    if (!resp || !resp.hasUpdate) { setUpdateBadge(false); upMsg(`已是最新版本 v${APP_VERSION}`); return }
+    setUpdateBadge(true, `发现新版本 v${resp.latest}`)
+    // Windows：自动下载并运行；Linux：展示两个下载链接（依据后端返回的资产类型判断）
+    if (resp.assetWin) {
+      if (!resp.assetWin) { upMsg('发现新版本，但未找到 Windows 安装包'); await openInBrowser(resp.htmlUrl); return }
+      const ok = await confirmNative(`发现新版本 ${resp.latest}（当前 ${resp.current}）\n是否立即下载并安装？`, '更新')
+      if (!ok) { upMsg('已取消更新'); return }
+      try {
+        upMsg('正在下载安装包…')
+        const savePath = await invoke('download_file', { url: resp.assetWin.proxyUrl || resp.assetWin.directUrl, useProxy: true }) as any as string
+        upMsg('下载完成，正在启动安装…')
+        try { await openPath(savePath) } catch { /* 回退：不提示失败，尽量不打断 */ }
+      } catch (e) {
+        upMsg('下载或启动安装失败，将打开发布页');
+        await openInBrowser(resp.htmlUrl)
+      }
+      return
+    }
+    // Linux：展示选择
+    showUpdateOverlayLinux(resp)
+  } catch (e) {
+    upMsg('检查更新失败')
+  }
+}
+
+function checkUpdateSilentOnceAfterStartup() {
+  try {
+    setTimeout(async () => {
+      try {
+        const resp = await invoke('check_update', { force: false, include_prerelease: false }) as any as CheckUpdateResp
+        if (resp && resp.hasUpdate) {
+          setUpdateBadge(true, `发现新版本 v${resp.latest}`)
+        }
+      } catch {
+        // 静默失败不提示
+      }
+    }, 5000)
+  } catch {}
 }
 
 // 切换模式
@@ -2651,6 +2900,7 @@ function bindEvents() {
   const btnRecent = document.getElementById('btn-recent')
   const btnLibrary = document.getElementById('btn-library')
   const btnAbout = document.getElementById('btn-about')
+  const btnUpdate = document.getElementById('btn-update')
   const btnUploader = document.getElementById('btn-uploader')
   const btnWysiwyg = document.getElementById('btn-wysiwyg')
 
@@ -2659,6 +2909,7 @@ function bindEvents() {
   if (btnSaveas) btnSaveas.addEventListener('click', guard(() => saveAs()))
   if (btnToggle) btnToggle.addEventListener('click', guard(() => toggleMode()))
   if (btnWysiwyg) btnWysiwyg.addEventListener('click', guard(() => toggleWysiwyg()))
+  if (btnUpdate) btnUpdate.addEventListener('click', guard(() => checkUpdateInteractive()))
   // 代码复制按钮（事件委托）
   // 库侧栏右键菜单
   document.addEventListener('contextmenu', (ev) => {
@@ -3283,6 +3534,8 @@ function bindEvents() {
     } catch {}
     console.log('应用初始化完成')
     void logInfo('flyMD (飞速MarkDown) 应用初始化完成')
+    // 启动后 5 秒进行一次静默检查，仅加红点提示
+    checkUpdateSilentOnceAfterStartup()
   } catch (error) {
     console.error('应用启动失败:', error)
     showError('应用启动失败', error)

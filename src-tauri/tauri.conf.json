@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "flymd",
-  "version": "0.0.6-fix",
+  "version": "0.0.7",
   "identifier": "com.flymd",
   "build": {
     "beforeDevCommand": "vite",
     "beforeBuildCommand": "vite build",
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173"
+    "devUrl": "http://127.0.0.1:5173"
   },
   "app": {
     "security": {
