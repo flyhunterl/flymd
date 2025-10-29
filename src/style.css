@@ -430,6 +430,31 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 
 /* === 全局滚动控制：去掉窗口级滚动，仅内部滚动 === */
 html, body { overflow: hidden; }
+/* 扩展管理弹窗 */
+.ext-overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.35); z-index: 80000; }
+.ext-overlay.show { display: flex; }
+.ext-dialog { width: 720px; max-width: calc(100% - 40px); background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,.2); }
+.ext-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; }
+.ext-close { border: none; background: transparent; color: var(--fg); cursor: pointer; font-size: 18px; line-height: 1; }
+.ext-body { padding: 12px 14px; max-height: 65vh; overflow: auto; }
+.ext-section { margin: 8px 0 14px 0; }
+.ext-subtitle { font-weight: 600; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.ext-install { display: flex; gap: 8px; }
+.ext-install input[type="text"] { flex: 1; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 8px; outline: none; font-size: 13px; min-width: 0; box-sizing: border-box; }
+.ext-install button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(127,127,127,0.08); color: var(--fg); cursor: pointer; }
+.ext-install button.primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+.ext-list { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; }
+.ext-item { display: contents; }
+.ext-item .ext-meta { display: flex; flex-direction: column; gap: 2px; }
+.ext-item .ext-name { font-size: 13px; font-weight: 600; }
+.ext-item .ext-desc { font-size: 12px; color: var(--muted); }
+.ext-item .ext-actions { display: flex; align-items: center; gap: 6px; }
+.ext-actions .btn { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(127,127,127,0.08); color: var(--fg); cursor: pointer; font-size: 12px; }
+.ext-actions .btn.primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+.ext-actions .btn.warn { border-color: #ef4444; color: #ef4444; background: rgba(239,68,68,0.08); }
+.ext-empty { font-size: 12px; color: var(--muted); }
+/* 隐藏插件自建的头部条，避免重复顶栏按钮 */
+.tp-fly-headbar { display: none !important; }
 
 /* === Markdown 代码渲染主题（简约）=== */
 :root {
@@ -554,5 +579,3 @@ html, body { overflow: hidden; }
 .container.wysiwyg .preview .katex-display { /* 块级公式也稍作留白，防止与段落挤在一起 */
   margin: 0.6em 0;
 }
-
-

@@ -10,6 +10,7 @@ struct PendingOpenPath(std::sync::Mutex<Option<String>>);
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use chrono::{DateTime, Utc};
+use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -261,6 +262,35 @@ async fn presign_put(req: PresignReq) -> Result<PresignResp, String> {
   Ok(PresignResp { put_url: base_url.to_string(), public_url })
 }
 
+#[derive(Debug, Deserialize)]
+struct XmlHttpReq {
+  url: String,
+  xml: String,
+}
+
+#[tauri::command]
+async fn http_xmlrpc_post(req: XmlHttpReq) -> Result<String, String> {
+  let client = reqwest::Client::builder()
+    .timeout(Duration::from_secs(20))
+    .build()
+    .map_err(|e| format!("client error: {e}"))?;
+  let res = client
+    .post(&req.url)
+    .header("Content-Type", "text/xml; charset=UTF-8")
+    .header("Accept", "text/xml, */*;q=0.1")
+    .header("User-Agent", "flymd-typecho-publisher/0.1")
+    .body(req.xml)
+    .send()
+    .await
+    .map_err(|e| format!("send error: {e}"))?;
+  let status = res.status();
+  let text = res.text().await.map_err(|e| format!("read error: {e}"))?;
+  if !status.is_success() {
+    return Err(format!("HTTP {}: {}", status.as_u16(), text));
+  }
+  Ok(text)
+}
+
 fn main() {
   tauri::Builder::default()
     .manage(PendingOpenPath::default())
@@ -270,7 +300,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
