@@ -410,6 +410,7 @@ function scheduleWysiwygRender() {
     _wysiwygRaf = requestAnimationFrame(async () => {
       try { await renderPreview() } catch {}
       syncScrollEditorToPreview()
+      try { ensureWysiwygCaretDotInView() } catch {}
       updateWysiwygCaretDot()
     })
   } catch {}
@@ -522,6 +523,33 @@ function updateWysiwygCaretDot() {
 }
 
 // 所见模式：输入 ``` 后自动补一个换行，避免预览代码块遮挡模拟光标
+// WYSIWYG 
+// 
+// WYSIWYG 
+// 
+// WYSIWYG 
+// 
+// WYSIWYG 
+// 
+// 
+// 
+// 在所见模式下，确保预览中的“模拟光标 _”可见
+function ensureWysiwygCaretDotInView() {
+  try {
+    if (!wysiwyg) return
+    const dot = preview.querySelector('.caret-dot') as HTMLElement | null
+    if (!dot) return
+    const pv = preview.getBoundingClientRect()
+    const dr = dot.getBoundingClientRect()
+    const margin = 10
+    if (dr.top < pv.top + margin) {
+      preview.scrollTop += dr.top - (pv.top + margin)
+    } else if (dr.bottom > pv.bottom - margin) {
+      preview.scrollTop += dr.bottom - (pv.bottom - margin)
+    }
+  } catch {}
+}
+
 function autoNewlineAfterBackticksInWysiwyg() {
   try {
     if (!wysiwyg) return
@@ -654,6 +682,25 @@ if (menubar) {
 }
 const containerEl = document.querySelector('.container') as HTMLDivElement
   if (containerEl) {
+  // 修复在所见模式中滚轮无法滚动编辑区的问题：
+  // 在容器层捕获 wheel 事件，直接驱动 textarea 的滚动并同步预览
+  try {
+    const handleWysiwygWheel = (e: WheelEvent) => {
+      if (!wysiwyg) return
+      try {
+        e.preventDefault()
+        const dy = e.deltaY || 0
+        const max = Math.max(0, editor.scrollHeight - editor.clientHeight)
+        const next = Math.max(0, Math.min(max, (editor.scrollTop >>> 0) + dy))
+        if (next !== editor.scrollTop) {
+          editor.scrollTop = next
+          syncScrollEditorToPreview()
+          try { ensureWysiwygCaretDotInView() } catch {}
+        }
+      } catch {}
+    }
+    containerEl.addEventListener('wheel', handleWysiwygWheel, { passive: false } as any)
+  } catch {}
   // 所见模式：当前行高亮覆盖层
   try {
     wysiwygLineEl = document.createElement('div') as HTMLDivElement
@@ -1209,6 +1256,8 @@ async function renderPreview() {
   // 包裹一层容器，用于样式定宽居中显示
   preview.innerHTML = `<div class="preview-body">${safe}</div>`
   try { decorateCodeBlocks(preview) } catch {}
+  // 所见模式下，确保“模拟光标 _”在预览区可见
+  try { if (wysiwyg) ensureWysiwygCaretDotInView() } catch {}
   // 外链安全属性
   preview.querySelectorAll('a[href]').forEach((a) => {
     const el = a as HTMLAnchorElement
@@ -2555,7 +2604,7 @@ function bindEvents() {
   // 所见模式：输入/合成结束/滚动时联动渲染与同步
   editor.addEventListener('input', () => { if (wysiwyg) { autoNewlineAfterBackticksInWysiwyg(); autoNewlineAfterInlineDollarInWysiwyg(); if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
   editor.addEventListener('compositionend', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
-  editor.addEventListener('scroll', () => { if (wysiwyg) { syncScrollEditorToPreview(); updateWysiwygCaretDot() } scheduleSaveDocPos() })
+  editor.addEventListener('scroll', () => { if (wysiwyg) { syncScrollEditorToPreview(); try { ensureWysiwygCaretDotInView() } catch {}; updateWysiwygCaretDot() } scheduleSaveDocPos() })
   editor.addEventListener('keyup', (e) => { if (wysiwyg) { if (wysiwygEnterToRenderOnly && e.key === 'Enter') scheduleWysiwygRender(); else void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
   editor.addEventListener('click', () => { if (wysiwyg) { void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
 
