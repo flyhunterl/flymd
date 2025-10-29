@@ -459,7 +459,7 @@ html, body { overflow: hidden; }
 
 /* 块级代码 */
 .preview pre { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 10px; padding: 12px 14px; overflow: auto; -webkit-overflow-scrolling: touch; margin: 12px 0; }
-.preview pre code { background: transparent; color: var(--code-fg); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 13px; line-height: 1.65; }
+.preview pre code { background: transparent; color: var(--code-fg); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 13px; line-height: 1.1; }
 /* 行内代码 */
 .preview :not(pre) > code { background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--code-border); border-radius: 6px; padding: 0 6px; font-size: 0.9em; }
 
@@ -534,5 +534,12 @@ html, body { overflow: hidden; }
 /* 所见模式：为状态条让出上内边距 */
 .container.wysiwyg .preview { background: var(--wysiwyg-bg); padding-top: 14px; }
 .container.wysiwyg .editor { padding-top: 14px; }
+
+/* === 行距压缩（代码块）=== */
+/* 预览模式：将代码块行距压缩到 0.8 */
+.preview pre code { line-height: 0.8 !important; }
+/* 所见模式：更小（0.7），同时作用于 pre 容器与 code 元素 */
+.container.wysiwyg .preview pre,
+.container.wysiwyg .preview pre code { line-height: 0.8 !important; }
 
 

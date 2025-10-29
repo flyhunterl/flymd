@@ -521,6 +521,24 @@ function updateWysiwygCaretDot() {
   } catch {}
 }
 
+// 所见模式：输入 ``` 后自动补一个换行，避免预览代码块遮挡模拟光标
+function autoNewlineAfterBackticksInWysiwyg() {
+  try {
+    if (!wysiwyg) return
+    const pos = editor.selectionStart >>> 0
+    if (pos < 3) return
+    const last3 = editor.value.slice(pos - 3, pos)
+    if (last3 === '```') {
+      const v = editor.value
+      // 在光标处插入换行，但将光标保持在换行前，便于继续输入语言标识（如 ```js\n）
+      editor.value = v.slice(0, pos) + '\n' + v.slice(pos)
+      editor.selectionStart = editor.selectionEnd = pos
+      dirty = true
+      refreshTitle()
+    }
+  } catch {}
+}
+
 // 动态添加"最近文件"菜单项
 const menubar = document.querySelector('.menubar') as HTMLDivElement
 if (menubar) {
@@ -2410,7 +2428,7 @@ function bindEvents() {
   if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
 
   // 所见模式：输入/合成结束/滚动时联动渲染与同步
-  editor.addEventListener('input', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
+  editor.addEventListener('input', () => { if (wysiwyg) { autoNewlineAfterBackticksInWysiwyg(); if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
   editor.addEventListener('compositionend', () => { if (wysiwyg) { if (!wysiwygEnterToRenderOnly) scheduleWysiwygRender(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })
   editor.addEventListener('scroll', () => { if (wysiwyg) { syncScrollEditorToPreview(); updateWysiwygCaretDot() } scheduleSaveDocPos() })
   editor.addEventListener('keyup', (e) => { if (wysiwyg) { if (wysiwygEnterToRenderOnly && e.key === 'Enter') scheduleWysiwygRender(); else void renderPreview(); updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink() } scheduleSaveDocPos() })

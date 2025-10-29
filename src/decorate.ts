@@ -1,4 +1,4 @@
-// 代码块装饰：语言角标、行号与复制按钮
+// 代码块装饰：加角标、行号与复制按钮
 export function decorateCodeBlocks(preview: HTMLElement) {
   try {
     const codes = Array.from(preview.querySelectorAll('pre > code.hljs')) as HTMLElement[]
@@ -7,10 +7,11 @@ export function decorateCodeBlocks(preview: HTMLElement) {
       if (!pre || pre.getAttribute('data-codebox') === '1') continue
       if (code.classList.contains('language-mermaid')) continue
       const lang = ((Array.from(code.classList).find(c => c.startsWith('language-')) || '').slice(9) || 'text').toUpperCase()
-      // 包装行生成行号（不破坏高亮 span）
+      // 按行包裹，并移除末尾多余空行（通常由渲染器结尾的 \n 导致）
       try {
         const html = code.innerHTML
         const parts = html.split('\n')
+        if (parts.length && parts[parts.length - 1] === '') parts.pop()
         code.innerHTML = parts.map(p => `<span class="cb-ln">${p || '&nbsp;'}</span>`).join('\n')
       } catch {}
       const box = document.createElement('div')
@@ -30,3 +31,4 @@ export function decorateCodeBlocks(preview: HTMLElement) {
     }
   } catch {}
 }
+
