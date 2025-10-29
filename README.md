@@ -5,7 +5,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.0.7-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.0.8-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -95,7 +95,7 @@
 ### 安装使用（推荐）
 
 1. 前往 [Releases](https://github.com/flyhunterl/flymd/releases) 下载最新版本
-2. 运行 `flymd_0.0.6_x64_setup.exe` 安装（文件名以实际发布为准）
+2. 运行 `flymd_0.0.8_x64_setup.exe` 安装（文件名以实际发布为准）
 3. 启动 flyMD，开始使用
 
 ## ⌨️ 快捷键
@@ -125,7 +125,9 @@
 
 ## 更新 v.0.0.8
 - 修复：未设置图床的时候从剪切板粘贴图片回退成base64
-- 新增: 未设置图床时粘贴板粘贴图片时将写入本地images目录[本地已存在的图片将以路径读取不写入images目录]
+- 新增: 未设置图床时粘贴板粘贴图片时将写入本地images目录
+[本地已存在的图片将以路径读取不写入images目录]
+[如过没有实际文档，会因没有目录回退到base64]
 - 说明：本地已存在的图片将以路径读取不写入images目录
 
 

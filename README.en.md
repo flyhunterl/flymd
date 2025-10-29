@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | English
 
-[![Version](https://img.shields.io/badge/version-v0.0.7-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.0.8-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -28,7 +28,7 @@ See the main README for screenshots.
 ## Install
 
 - Download from Releases and run the installer:
-  - Windows: `flymd_0.0.7_x64_setup.exe` (file name may vary per release)
+  - Windows: `flymd_0.0.8_x64_setup.exe` (file name may vary per release)
 - Requirements:
   - Windows 10/11 (x64) or Linux
   - WebView2 Runtime on Windows (usually preinstalled)
@@ -81,9 +81,16 @@ See the main README for screenshots.
 - `Esc` Close Preview / dialogs
 
 
+## Changelog (v0.0.8)
+
+- Paste images without uploader: saves to a local `images/` folder next to the current document and inserts a relative path (`images/<name>`). If the image already exists, we reference by path (no copy).
+- Unsaved documents: if a default paste directory is configured, pasted images are saved there and the absolute/escaped path is inserted. If not available or write fails, falls back to data URL.
+- Auto fallback: on preview, local paths are rendered via Tauri `asset:`; if loading fails, it automatically falls back to a `data:` URL to keep images visible in dev.
+
 ## Changelog (v0.0.7)
 
-- Library: improved file support and filters (md/markdown/txt/PDF); better UX for open/rename/move/delete.
+- Library: improved file support; customizable sort; filters to hide non-md/markdown/txt/PDF; better UX for open/rename/move/delete.
+- Update: built-in update checker and downloader.
 - File operations: add Trash integration and force remove APIs to improve safety and recovery.
 - Mermaid: add caching of rendered SVG to reduce flicker and speed up repeated renders.
 - Stability and performance improvements.
