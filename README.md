@@ -200,3 +200,8 @@
 ## 常见问题 (Linux)
 
 - [Arch 遇到程序打开空白的解决方法](arch.md)
+
+
+<img width="300" height="300" alt="image" src="https://github.com/user-attachments/assets/4a716fd5-dc61-4a4f-b968-91626debe8d2" />
+
+
