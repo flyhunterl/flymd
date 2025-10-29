@@ -89,8 +89,8 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
   let ents: any[] = []
   try { ents = await readDir(dir, { recursive: false } as any) as any[] } catch { ents = [] }
   const dirs: any[] = []
-  // 仅展示指定后缀的文档（严格三种：md / txt / pdf）
-  const allow = new Set(['md', 'txt', 'pdf'])
+  // 仅展示指定后缀的文档（md / markdown / txt / pdf）
+  const allow = new Set(['md', 'markdown', 'txt', 'pdf'])
   for (const it of ents) {
     const p: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
     let isDir = false
