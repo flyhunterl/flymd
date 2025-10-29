@@ -85,12 +85,19 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
   let ents: any[] = []
   try { ents = await readDir(dir, { recursive: false } as any) as any[] } catch { ents = [] }
   const dirs: any[] = []
+  // 仅展示指定后缀的文档
+  const allow = new Set(['md', 'markdown', 'txt', 'pdf'])
   for (const it of ents) {
     const p: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
     let isDir = false
     try { isDir = !!(await stat(p) as any)?.isDirectory } catch { isDir = false }
-    if (isDir) dirs.push({ name: nameOf(p), path: p, isDir: true })
-    else items.push({ name: nameOf(p), path: p, isDir: false })
+    if (isDir) {
+      dirs.push({ name: nameOf(p), path: p, isDir: true })
+    } else {
+      const nm = nameOf(p)
+      const ext = (nm.split('.').pop() || '').toLowerCase()
+      if (allow.has(ext)) items.push({ name: nm, path: p, isDir: false })
+    }
   }
   dirs.sort((a, b) => a.name.localeCompare(b.name))
   items.sort((a, b) => a.name.localeCompare(b.name))
@@ -348,4 +355,3 @@ export const fileTree: FileTreeAPI = {
 }
 
 export default fileTree
-
