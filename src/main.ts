@@ -30,6 +30,7 @@ import pkg from '../package.json'
 const APP_VERSION: string = (pkg as any)?.version ?? '0.0.0'
 
 type Mode = 'edit' | 'preview'
+type LibSortMode = 'name_asc' | 'name_desc'
 
 // 最近文件最多条数
 const RECENT_MAX = 5
@@ -2088,6 +2089,24 @@ async function setLibraryRoot(p: string) {
   } catch {}
 }
 
+// 库排序偏好（持久化）
+async function getLibrarySort(): Promise<LibSortMode> {
+  try {
+    if (!store) return 'name_asc'
+    const val = await store.get('librarySort')
+    const s = (typeof val === 'string' ? val : '') as LibSortMode
+    return (s === 'name_desc' ? 'name_desc' : 'name_asc')
+  } catch { return 'name_asc' }
+}
+
+async function setLibrarySort(mode: LibSortMode) {
+  try {
+    if (!store) return
+    await store.set('librarySort', mode)
+    await store.save()
+  } catch {}
+}
+
 // 粘贴图片默认保存目录（无打开文件时使用）
 async function getDefaultPasteDir(): Promise<string | null> {
   try {
@@ -2618,6 +2637,21 @@ function bindEvents() {
     }))
     menu.appendChild(mkItem('重命名', async () => { try { const base = path.replace(/[\\/][^\\/]*$/, ''); const oldFull = path.split(/[\\/]+/).pop() || ''; const m = oldFull.match(/^(.*?)(\.[^.]+)?$/); const oldStem = (m?.[1] || oldFull); const oldExt = (m?.[2] || ''); const newStem = await openRenameDialog(oldStem, oldExt); if (!newStem || newStem === oldStem) return; const name = newStem + oldExt; const dst = base + (base.includes('\\') ? '\\' : '/') + name; if (await exists(dst)) { alert('同名已存在'); return } await moveFileSafe(path, dst); if (currentFilePath === path) { currentFilePath = dst as any; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; try { const nodes = Array.from((document.getElementById('lib-tree')||document.body).querySelectorAll('.lib-node') as any) as HTMLElement[]; const node = nodes.find(n => (n as any).dataset?.path === dst); if (node) node.dispatchEvent(new MouseEvent('click', { bubbles: true })) } catch {} } catch (e) { showError('重命名失败', e) } }))
     menu.appendChild(mkItem('删除', async () => { try { console.log('[删除] 右键菜单删除, 路径:', path); const ok = await confirmNative('确定删除？将移至回收站'); console.log('[删除] 用户确认结果:', ok); if (!ok) return; console.log('[删除] 开始删除文件'); await deleteFileSafe(path, false); console.log('[删除] 删除完成'); if (currentFilePath === path) { currentFilePath = null as any; if (editor) (editor as HTMLTextAreaElement).value = ''; if (preview) preview.innerHTML = ''; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('删除失败', e) } }))
+
+    // 排列方式（名称 A→Z / Z→A）
+    try {
+      const sep = document.createElement('div') as HTMLDivElement
+      sep.style.borderTop = '1px solid ' + (getComputedStyle(document.documentElement).getPropertyValue('--border') || '#e5e7eb')
+      sep.style.margin = '6px 0'
+      menu.appendChild(sep)
+      const applySort = async (mode: LibSortMode) => {
+        await setLibrarySort(mode)
+        try { fileTree.setSort(mode) } catch {}
+        try { await fileTree.refresh() } catch {}
+      }
+      menu.appendChild(mkItem('按名称 A→Z', () => { void applySort('name_asc') }))
+      menu.appendChild(mkItem('按名称 Z→A', () => { void applySort('name_desc') }))
+    } catch {}
     menu.style.left = Math.min(ev.clientX, (window.innerWidth - 180)) + 'px'
     menu.style.top = Math.min(ev.clientY, (window.innerHeight - 120)) + 'px'
     menu.style.display = 'block'
@@ -2750,6 +2784,8 @@ function bindEvents() {
     let root = await getLibraryRoot()
     if (!root) root = await pickLibraryRoot()
     const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }
+    // 应用持久化的排序偏好
+    try { const s = await getLibrarySort(); fileTree.setSort(s); await fileTree.refresh() } catch {}
   }))
   if (btnAbout) btnAbout.addEventListener('click', guard(() => showAbout(true)))
   if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
@@ -2996,8 +3032,8 @@ function bindEvents() {
   try {
     const chooseBtn = document.getElementById('lib-choose') as HTMLButtonElement | null
     const refreshBtn = document.getElementById('lib-refresh') as HTMLButtonElement | null
-    if (chooseBtn) chooseBtn.addEventListener('click', guard(async () => { await pickLibraryRoot(); const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } }))
-    if (refreshBtn) refreshBtn.addEventListener('click', guard(async () => { const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } }))
+    if (chooseBtn) chooseBtn.addEventListener('click', guard(async () => { await pickLibraryRoot(); const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } try { const s = await getLibrarySort(); fileTree.setSort(s); await fileTree.refresh() } catch {} }))
+    if (refreshBtn) refreshBtn.addEventListener('click', guard(async () => { const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } try { const s = await getLibrarySort(); fileTree.setSort(s); await fileTree.refresh() } catch {} }))
   } catch {}
 
   // 关于弹窗：点击遮罩或“关闭”按钮关闭

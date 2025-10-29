@@ -18,6 +18,8 @@ export type FileTreeAPI = {
   getSelectedDir: () => string | null
   newFileInSelected: () => Promise<void>
   newFolderInSelected: () => Promise<void>
+  // 设置排序方式
+  setSort: (mode: 'name_asc' | 'name_desc') => void
 }
 
 const state = {
@@ -28,6 +30,7 @@ const state = {
   selectedIsDir: false,
   watching: false,
   unwatch: null as null | (() => void),
+  sortMode: 'name_asc' as 'name_asc' | 'name_desc',
 }
 
 // 目录递归包含受支持文档的缓存
@@ -108,6 +111,12 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
   }
   dirs.sort((a, b) => a.name.localeCompare(b.name))
   items.sort((a, b) => a.name.localeCompare(b.name))
+  // 根据排序方式对结果进行整体调整（目前仅支持名称升/降序）
+  if (state.sortMode === 'name_desc') {
+    // 目录和文件各自倒序，以保持“目录在前”的分组
+    dirs.reverse()
+    items.reverse()
+  }
   return [...dirs, ...items]
 }
 
@@ -402,6 +411,7 @@ export const fileTree: FileTreeAPI = {
   init, refresh,
   getSelectedDir: () => (state.selectedIsDir ? (state.selected || null) : (state.selected ? base(state.selected) : null)),
   newFileInSelected, newFolderInSelected,
+  setSort: (mode) => { state.sortMode = mode },
 }
 
 export default fileTree
