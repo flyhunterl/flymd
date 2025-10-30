@@ -301,7 +301,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file, run_installer])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
@@ -562,12 +562,21 @@ async fn download_file(url: String, use_proxy: Option<bool>) -> Result<String, S
       .and_then(|mut s| s.next_back())
       .unwrap_or("download.bin")
       .to_string();
-    let mut path = std::env::temp_dir();
+        // 保存到用户下载目录（不可用时回退到临时目录）
+    #[cfg(target_os = "windows")]
+    let base_download = std::env::var("USERPROFILE")
+      .map(|p| std::path::PathBuf::from(p).join("Downloads"))
+      .unwrap_or_else(|_| std::env::temp_dir());
+    #[cfg(not(target_os = "windows"))]
+    let base_download = std::env::var("HOME")
+      .map(|p| std::path::PathBuf::from(p).join("Downloads"))
+      .unwrap_or_else(|_| std::env::temp_dir());
+    let mut path = base_download.clone();
     path.push(&fname);
     let direct = (u, path);
     let proxy = (
       url::Url::parse(&gh_proxy_url(&url)).map_err(|e| format!("invalid proxy url: {e}"))?,
-      std::env::temp_dir().join(&fname)
+      base_download.join(&fname)
     );
     (direct, proxy)
   };
@@ -681,4 +690,31 @@ async fn force_remove_path(path: String) -> Result<(), String> {
   .await
   .map_err(|e| format!("join error: {e}"))??;
   Ok(())
+}
+
+#[tauri::command]
+async fn run_installer(path: String) -> Result<(), String> {
+  #[cfg(target_os = "windows")]
+  {
+    use std::process::Command;
+    // 使用 PowerShell 以管理员权限启动安装程序
+    let status = Command::new("powershell")
+      .args([
+        "-NoProfile",
+        "-Command",
+        "Start-Process",
+        "-FilePath",
+        &path,
+        "-Verb",
+        "runas",
+      ])
+      .status()
+      .map_err(|e| format!("spawn error: {e}"))?;
+    let _ = status; // 忽略返回码，由安装器自行处理
+    Ok(())
+  }
+  #[cfg(not(target_os = "windows"))]
+  {
+    Err("run_installer only supports Windows".into())
+  }
 }

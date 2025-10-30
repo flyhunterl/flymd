@@ -2016,6 +2016,31 @@ function ensureUpdateOverlay(): HTMLDivElement {
 }
 
 function showUpdateOverlayLinux(resp: CheckUpdateResp) {
+
+function showUpdateDownloadedOverlay(savePath: string, resp: CheckUpdateResp) {
+  const ov = ensureUpdateOverlay()
+  const body = ov.querySelector('#update-body') as HTMLDivElement
+  const act = ov.querySelector('#update-actions') as HTMLDivElement
+  const esc = (s: string) => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  body.innerHTML = `
+    <div style="margin-bottom:8px;">已下载新版本 <b>${resp.latest}</b>（当前 ${resp.current}）</div>
+    <div>保存位置：<code>${esc(savePath)}</code></div>
+  `
+  act.innerHTML = ''
+  const mkBtn = (label: string, onClick: () => void) => {
+    const b = document.createElement('button')
+    b.textContent = label
+    b.addEventListener('click', onClick)
+    act.appendChild(b)
+    return b
+  }
+  const dir = savePath.replace(/[\/\\][^\/\\]+$/, '')
+  mkBtn('直接运行安装包', () => { void openPath(savePath) })
+  mkBtn('打开所在文件夹', () => { if (dir) void openPath(dir) })
+  mkBtn('前往发布页', () => { void openInBrowser(resp.htmlUrl) })
+  mkBtn('关闭', () => ov.classList.add('hidden'))
+  ov.classList.remove('hidden')
+}
   const ov = ensureUpdateOverlay()
   const body = ov.querySelector('#update-body') as HTMLDivElement
   const act = ov.querySelector('#update-actions') as HTMLDivElement
@@ -2076,7 +2101,7 @@ async function checkUpdateInteractive() {
           if (!ok) throw new Error('all proxies failed')
         }
         upMsg('下载完成，正在启动安装…')
-        try { await openPath(savePath) } catch { /* 回退：不提示失败，尽量不打断 */ }
+        try { await invoke('run_installer', { path: savePath }); upMsg('已启动安装程序，即将关闭…'); setTimeout(() => { try { void getCurrentWindow().destroy() } catch {} }, 800) } catch (e) { showUpdateDownloadedOverlay(savePath, resp) }
       } catch (e) {
         upMsg('下载或启动安装失败，将打开发布页');
         await openInBrowser(resp.htmlUrl)
