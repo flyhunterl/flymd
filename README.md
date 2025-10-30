@@ -5,7 +5,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.0.9-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -15,7 +15,7 @@
 ## ✨ 项目特色
 
 
-- 即开即用：安装包仅6MB 拒绝臃肿。冷启动毫秒级响应，代码一键复制
+- 即开即用：安装包仅5MB 拒绝臃肿。冷启动毫秒级响应，代码一键复制
 - 界面干净：极简界面，默认仅菜单栏+编辑区，专注内容创作 启动速度和响应速度优秀
 - 文库功能：支持指定文件夹，树状目录显示文件夹下子文件夹及文档 并支持文档管理
 - 安全可靠：本地运行，无网络连接，预览 HTML 自动消毒 
@@ -74,6 +74,9 @@
       - 若图床已开启但上传失败→回退到本地落盘分支作为兜底
       - 本地已存在的图片将以路径读取不写入images目录
 
+### 多端同步
+- 待测试
+
 
 ### 🎨 界面体验
 - Windows 记事本风格菜单栏
@@ -131,6 +134,12 @@
 - 预览切换：≤ 16ms
 
 ## 🗺️ 路线图
+
+## 更新 v.0.1.0
+- 新增：S3/R2同步扩展[需要测试反馈]
+> 该版本同步功能尚待完整测试，请注意数据备份。使用问题请提交issue
+
+
 
 ## 更新 v.0.0.9-fix
 - 新增：下载更新启动失败后提供手动打开方式作为后退

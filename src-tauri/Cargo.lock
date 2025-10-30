@@ -1649,7 +1649,7 @@ dependencies = [
 
 [[package]]
 name = "flymd"
-version = "0.0.9-fix"
+version = "0.1.0"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",

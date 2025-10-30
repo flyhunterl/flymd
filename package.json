@@ -1,6 +1,6 @@
 {
   "name": "flymd",
-  "version": "0.0.9-fix",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -31,3 +31,4 @@
     "punycode": "^2.3.0"
   }
 }
+
