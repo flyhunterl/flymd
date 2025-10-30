@@ -9,14 +9,13 @@
 A fast, lightweight, and stable Markdown editor/previewer powered by Tauri.
 
 
-## Highlights
-
+- Extensions & Plugins: manage built-ins and install community extensions (v0.0.9).
 - WYSIWYG overlay: instant rendering while typing; toggle with `Ctrl+Shift+E`.
 - Solid Preview mode: toggle Edit/Preview with `Ctrl+E`.
-- Full Markdown stack: Markdown‑It, KaTeX (LaTeX), Mermaid, highlight.js.
-- Safe HTML rendering with DOMPurify; image path auto‑fix for Tauri `asset:`.
+- Full Markdown stack: markdown-it, KaTeX (LaTeX), Mermaid, highlight.js.
+- Safe HTML rendering with DOMPurify; image path auto-fix for Tauri `asset:`.
 - File library sidebar with quick open/rename/move/delete.
-- Drag‑and‑drop open; PDF inline preview; paste or upload images to S3/R2.
+- Drag-and-drop open; PDF inline preview; paste or upload images to S3/R2.
 - Position persistence: restore last caret/scroll position per file.
 
 
@@ -48,25 +47,34 @@ See the main README for screenshots.
 
 - Toggle Edit/Preview: `Ctrl+E`
 - WYSIWYG overlay: `Ctrl+Shift+E`
-- Insert link: `Ctrl+K`  •  Bold: `Ctrl+B`  •  Italic: `Ctrl+I`
+- Insert link: `Ctrl+K` | Bold: `Ctrl+B` | Italic: `Ctrl+I`
 - New/Open/Save/Save As: `Ctrl+N` / `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S`
 - Drag a `.md` file onto the window to open; paste an image to insert and upload if configured.
 
 
 ## Markdown Features
 
-- Markdown‑It with `breaks: true` so a single newline becomes `<br>`.
+- markdown-it with `breaks: true` so a single newline becomes `<br>`.
 - KaTeX for inline/block math; tuned to avoid overlap in WYSIWYG view.
-- Mermaid diagrams via fenced blocks ```mermaid.
+- Mermaid diagrams via ```mermaid` fenced blocks.
 - Safe rendering via DOMPurify, with essential SVG/Math tags allowed.
 
 
+## Extensions
+
+- Manage built-in extensions and install community extensions from GitHub or URLs.
+- Built-in: Image Uploader (S3/R2) settings dialog is integrated; you can open it from Extensions.
+- Install example: Typecho publisher extension (community) can be installed via the installer input using `TGU-HansJack/typecho-publisher-flymd@main`.
+- Open the Extensions panel via the top-right Extensions button.
 ## Image Upload (S3/R2)
 
-- Configure your S3/R2 credentials (see code under `src/uploader/s3.ts`).
-- Paste an image or drag/drop to insert. While uploading, a placeholder is shown and then replaced with the final URL.
-
-
+- Configure your S3/R2 credentials (see Settings > Extensions > Image Uploader).
+- Paste or drag an image to insert. While uploading, a placeholder is shown and then replaced with the final URL.
+- Fallback priority:
+  - Enabled + configured uploader: upload to S3/R2 and insert the public URL (no local copy).
+  - Disabled or not configured: save to a local `images/` folder next to the current document; for unsaved docs, save to the system Pictures directory and insert the absolute/escaped path.
+  - Upload error when enabled: fallback to the local save branch as a safety net.
+- Preview rendering: local paths are resolved via Tauri sset:; if loading fails in dev, automatically falls back to a `data:` URL to keep images visible.
 ## Known Behaviors
 
 - In WYSIWYG mode, unclosed ```/~~~ fences and unclosed math blocks are intentionally not rendered until closed, to avoid obstructing input.
@@ -75,12 +83,20 @@ See the main README for screenshots.
 
 ## Shortcuts
 
-- `Ctrl+N` New  •  `Ctrl+O` Open  •  `Ctrl+S` Save  •  `Ctrl+Shift+S` Save As
-- `Ctrl+E` Edit/Preview  •  `Ctrl+Shift+E` WYSIWYG overlay
+- `Ctrl+N` New | `Ctrl+O` Open | `Ctrl+S` Save | `Ctrl+Shift+S` Save As
+- `Ctrl+E` Edit/Preview | `Ctrl+Shift+E` WYSIWYG overlay
 - `Ctrl+B` Bold  •  `Ctrl+I` Italic  •  `Ctrl+K` Insert Link
 - `Esc` Close Preview / dialogs
 
 
+## Changelog (v0.0.9)
+
+- New: Extensions system — manage and install extensions. Thanks to contributor [HansJack](https://github.com/TGU-HansJack).
+
+## Changelog (v0.0.8-fix)
+
+- Fix: incorrect update URL caused auto-download failures in some cases.
+- Add: backup proxy mirrors to reduce failures when primary proxy is unavailable.
 ## Changelog (v0.0.8)
 
 - Paste images without uploader: saves to a local `images/` folder next to the current document and inserts a relative path (`images/<name>`). If the image already exists, we reference by path (no copy).
@@ -103,4 +119,6 @@ Apache-2.0. See `LICENSE`.
 
 ## Acknowledgements
 
-- Tauri  •  Markdown‑It  •  DOMPurify  •  highlight.js  •  KaTeX  •  Mermaid
+- Tauri | markdown-it | DOMPurify | highlight.js | KaTeX | Mermaid
+
+

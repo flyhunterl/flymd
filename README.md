@@ -5,7 +5,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.0.8-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.0.9-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -222,8 +222,6 @@
 - [x] Windows 10/11
 - [x] Linux（桌面环境）
 
-### 计划中
-- [ ] Typecho 发布（XML-RPC）：一键发布/更新文章到 Typecho，支持草稿/发布、分类与标签
 
 ## 🤝 贡献指南
 
