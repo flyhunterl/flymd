@@ -3565,8 +3565,10 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
         try {
           const buf = new Uint8Array(await file.arrayBuffer())
           await writeFile(dst as any, buf as any)
-          const rel = 'images/' + fname  // 相对当前文档目录的路径
-          replaceUploadingPlaceholder(id, `![${fname}](${rel})`)
+          // 与拖拽一致：优先使用本地绝对路径，必要时用尖括号包裹
+          const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+          const mdUrl = needAngle ? `<${dst}>` : dst
+          replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
           return
         } catch {}
       }
@@ -3589,6 +3591,24 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
             return
           } catch {}
         }
+        // 未设置默认粘贴目录，则回退保存到用户图片目录（Windows/Linux）
+        try {
+          const pic = await getUserPicturesDir()
+          if (pic) {
+            const baseDir = pic.replace(/[\\/]+$/, '')
+            const sep = baseDir.includes('\\') ? '\\' : '/'
+            const dst = baseDir + sep + fname
+            try {
+              const buf = new Uint8Array(await file.arrayBuffer())
+              try { await ensureDir(baseDir) } catch {}
+              await writeFile(dst as any, buf as any)
+              const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+              const mdUrl = needAngle ? `<${dst}>` : dst
+              replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
+              return
+            } catch {}
+          }
+        } catch {}
       }
     } catch {}
     try {
@@ -3597,6 +3617,26 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
     } catch {}
   })()
   return Promise.resolve()
+}
+
+// 获取用户图片目录：优先使用 Tauri API，失败则基于 homeDir 猜测 Pictures
+async function getUserPicturesDir(): Promise<string | null> {
+  try {
+    const mod: any = await import('@tauri-apps/api/path')
+    if (mod && typeof mod.pictureDir === 'function') {
+      const p = await mod.pictureDir()
+      if (p && typeof p === 'string') return p.replace(/[\\/]+$/, '')
+    }
+    if (mod && typeof mod.homeDir === 'function') {
+      const h = await mod.homeDir()
+      if (h && typeof h === 'string') {
+        const base = h.replace(/[\\/]+$/, '')
+        const sep = base.includes('\\') ? '\\' : '/'
+        return base + sep + 'Pictures'
+      }
+    }
+  } catch {}
+  return null
 }
 
 function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Promise<void> {
