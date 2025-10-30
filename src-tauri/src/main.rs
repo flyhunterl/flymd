@@ -292,6 +292,128 @@ async fn http_xmlrpc_post(req: XmlHttpReq) -> Result<String, String> {
   Ok(text)
 }
 
+
+// ===== CODEX SYNC S3 START =====
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct S3Conn {
+  access_key_id: String,
+  secret_access_key: String,
+  bucket: String,
+  #[serde(default)]
+  region: Option<String>,
+  #[serde(default)]
+  endpoint: Option<String>,
+  #[serde(default = "S3Conn::default_true")]
+  force_path_style: bool,
+}
+impl S3Conn { fn default_true() -> bool { true } }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct S3ListReq { conn: S3Conn, prefix: String }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct S3ObjectMeta { key: String, size: i64, etag: Option<String>, last_modified_ms: Option<i64> }
+
+#[tauri::command]
+async fn s3_list_objects(req: S3ListReq) -> Result<Vec<S3ObjectMeta>, String> {
+  use aws_sdk_s3 as s3;
+  use aws_config::meta::region::RegionProviderChain;
+  use s3::config::Region;
+
+  let region_str = req.conn.region.clone().unwrap_or_else(|| "us-east-1".to_string());
+  let region = Region::new(region_str.clone());
+  let region_provider = RegionProviderChain::first_try(region.clone());
+  let base_conf = aws_config::defaults(aws_config::BehaviorVersion::latest())
+    .region(region_provider)
+    .load()
+    .await;
+
+  let creds = s3::config::Credentials::new(
+    req.conn.access_key_id.clone(),
+    req.conn.secret_access_key.clone(),
+    None, None, "flymd"
+  );
+  let mut conf_builder = s3::config::Builder::from(&base_conf)
+    .credentials_provider(creds)
+    .force_path_style(req.conn.force_path_style);
+  if let Some(ep) = &req.conn.endpoint { if !ep.trim().is_empty() { conf_builder = conf_builder.endpoint_url(ep.trim()); } }
+  let conf = conf_builder.build();
+  let client = s3::Client::from_conf(conf);
+
+  let mut out: Vec<S3ObjectMeta> = Vec::new();
+  let mut token: Option<String> = None;
+  loop {
+    let mut call = client
+      .list_objects_v2()
+      .bucket(&req.conn.bucket)
+      .prefix(&req.prefix)
+      .max_keys(1000);
+    if let Some(t) = &token { call = call.continuation_token(t); }
+    let resp = call.send().await.map_err(|e| format!("list error: {e}"))?;
+    for o in resp.contents() {
+      let key = o.key().unwrap_or("").to_string();
+      let size = o.size().unwrap_or(0);
+      let etag = o.e_tag().map(|s| s.to_string());
+      let lm_ms = o.last_modified().map(|dt| dt.secs() * 1000 + (dt.subsec_nanos() as i64)/1_000_000);
+      out.push(S3ObjectMeta { key, size, etag, last_modified_ms: lm_ms });
+    }
+    if resp.is_truncated().unwrap_or(false) {
+      token = resp.next_continuation_token().map(|s| s.to_string());
+      if token.is_none() { break; }
+    } else { break; }
+}
+  Ok(out)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct S3GetReq { conn: S3Conn, key: String, dest_path: String }
+
+#[tauri::command]
+async fn s3_get_object_to_path(req: S3GetReq) -> Result<(), String> {
+  use aws_sdk_s3 as s3;
+  use aws_config::meta::region::RegionProviderChain;
+  use s3::config::Region;
+
+  let region_str = req.conn.region.clone().unwrap_or_else(|| "us-east-1".to_string());
+  let region = Region::new(region_str.clone());
+  let region_provider = RegionProviderChain::first_try(region.clone());
+  let base_conf = aws_config::defaults(aws_config::BehaviorVersion::latest())
+    .region(region_provider)
+    .load()
+    .await;
+
+  let creds = s3::config::Credentials::new(
+    req.conn.access_key_id.clone(), req.conn.secret_access_key.clone(), None, None, "flymd"
+  );
+  let mut conf_builder = s3::config::Builder::from(&base_conf)
+    .credentials_provider(creds)
+    .force_path_style(req.conn.force_path_style);
+  if let Some(ep) = &req.conn.endpoint { if !ep.trim().is_empty() { conf_builder = conf_builder.endpoint_url(ep.trim()); } }
+  let conf = conf_builder.build();
+  let client = s3::Client::from_conf(conf);
+
+  let resp = client
+    .get_object()
+    .bucket(&req.conn.bucket)
+    .key(&req.key)
+    .send()
+    .await
+    .map_err(|e| format!("get_object error: {e}"))?;
+
+  {
+    use std::path::Path;
+    use tokio::fs;
+    if let Some(parent) = Path::new(&req.dest_path).parent() { fs::create_dir_all(parent).await.map_err(|e| format!("create_dir_all error: {e}"))?; }
+  }
+  let bytes = resp.body.collect().await.map_err(|e| format!("collect error: {e}"))?;
+  tokio::fs::write(&req.dest_path, &bytes.into_bytes()).await.map_err(|e| format!("write error: {e}"))?;
+  Ok(())
+}
+// ===== CODEX SYNC S3 END =====
 fn main() {
   tauri::Builder::default()
     .manage(PendingOpenPath::default())
@@ -301,7 +423,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file, run_installer])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file, run_installer, s3_list_objects, s3_get_object_to_path])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]

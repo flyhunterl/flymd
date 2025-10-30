@@ -1,4 +1,4 @@
-/*
+﻿/*
   flymd 主入口（中文注释）
   - 极简编辑器：<textarea>
   - Ctrl+E 切换编辑/预览
@@ -193,7 +193,8 @@ type PluginManifest = { id: string; name?: string; version?: string; author?: st
 type InstalledPlugin = { id: string; name?: string; version?: string; enabled?: boolean; dir: string; main: string; builtin?: boolean; description?: string }
 const PLUGINS_DIR = 'flymd/plugins'
 const builtinPlugins: InstalledPlugin[] = [
-  { id: 'uploader-s3', name: '图床 (S3/R2)', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: '粘贴/拖拽图片自动上传，支持 S3/R2 直连，使用设置中的凭据。' }
+  { id: 'uploader-s3', name: '图片 (S3/R2)', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: '粘贴/拖拽图片自动上传，支持 S3/R2。' },
+  { id: 'sync-s3', name: '同步 (S3/R2)', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: '将库与 S3/R2 双向同步（MVP）。' }
 ]
 const activePlugins = new Map<string, any>() // id -> module
 const pluginMenuAdded = new Map<string, boolean>() // 限制每个插件仅添加一个菜单项
@@ -4247,6 +4248,7 @@ async function refreshExtensionsUI(): Promise<void> {
   const host = _extListHost
   host.innerHTML = ''
   // Builtins
+  // Builtins
   const builtinsEl = document.createElement('div')
   builtinsEl.className = 'ext-section'
   const st1 = document.createElement('div'); st1.className = 'ext-subtitle'; st1.textContent = '内置扩展'
@@ -4260,33 +4262,22 @@ async function refreshExtensionsUI(): Promise<void> {
     const desc = document.createElement('div'); desc.className = 'ext-desc'; desc.textContent = b.description || ''
     meta.appendChild(name); meta.appendChild(desc)
     const actions = document.createElement('div'); actions.className = 'ext-actions'
-    const btnEnable = document.createElement('button'); btnEnable.className = 'btn'
-    const upCfg = await getUploaderConfig().catch(() => null)
-    const enabled = !!upCfg
-    btnEnable.textContent = enabled ? '已开启' : '开启'
-    btnEnable.addEventListener('click', async () => {
-      try {
-        const cur = await getUploaderConfig().catch(() => null)
-        const next = cur ? null : { enabled: true, accessKeyId: '', secretAccessKey: '', bucket: '', region: 'auto', endpoint: '', forcePathStyle: true, aclPublicRead: true, keyTemplate: '{year}/{month}{fileName}{md5}.{extName}' } as any
-        if (store) {
-          if (next) { await store.set('uploader', next) } else { await store.set('uploader', null) }
-          await store.save()
-        }
-        await refreshExtensionsUI()
-        pluginNotice('已更新图床开关', 'ok', 1200)
-      } catch (e) { showError('更新图床开关失败', e) }
-    })
-    const btnSettings = document.createElement('button'); btnSettings.className = 'btn primary'; btnSettings.textContent = '设置'
-    // 打开内置图床设置对话框
-    btnSettings.addEventListener('click', () => { try { void showExtensionsOverlay(false); void openUploaderDialog() } catch {} })
-    // 隐藏图床扩展开启按钮（扩展弹窗内不展示）
-try { (btnEnable as any).style.display = 'none' } catch {}
-actions.appendChild(btnSettings)
+    if (b.id === 'uploader-s3') {
+      const btnSet = document.createElement('button'); btnSet.className = 'btn primary'; btnSet.textContent = '设置'
+      btnSet.addEventListener('click', () => { try { void showExtensionsOverlay(false); void openUploaderDialog() } catch {} })
+      actions.appendChild(btnSet)
+    } else if (b.id === 'sync-s3') {
+      const btnRun = document.createElement('button'); btnRun.className = 'btn'; btnRun.textContent = '立即同步'
+      btnRun.addEventListener('click', async () => { try { await performSyncInteractive() } catch (e) { showError('同步失败', e) } })
+      const btnSet = document.createElement('button'); btnSet.className = 'btn primary'; btnSet.textContent = '设置'
+      btnSet.addEventListener('click', async () => { try { void showExtensionsOverlay(false); await openSyncDialog() } catch (e) { showError('打开设置失败', e) } })
+      actions.appendChild(btnRun)
+      actions.appendChild(btnSet)
+    }
     row.appendChild(meta); row.appendChild(actions)
     list1.appendChild(row)
   }
   host.appendChild(builtinsEl)
-
   // Installed
   const st2wrap = document.createElement('div'); st2wrap.className = 'ext-section'
   const st2 = document.createElement('div'); st2.className = 'ext-subtitle'; st2.textContent = '已安装扩展'
@@ -4481,6 +4472,325 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
 
 
 
+
+
+
+
+
+
+// ===== CODEX SYNC (S3/R2) START =====
+
+type SyncConfig = {
+  enabled: boolean
+  auto: boolean
+  accessKeyId: string
+  secretAccessKey: string
+  bucket: string
+  region?: string
+  endpoint?: string
+  forcePathStyle?: boolean
+  prefix?: string // 远程前缀，例如 vault/<vaultId>
+}
+
+type LocalMeta = { mtime: number; size: number }
+
+type RemoteMeta = { etag?: string; lastModified: number; size: number }
+
+let _syncDebounce = false
+
+async function getSyncConfig(): Promise<SyncConfig | null> {
+  try {
+    if (!store) return null
+    const raw = await store.get('sync')
+    if (!raw || typeof raw !== 'object') return null
+    const o = raw as any
+    const cfg: SyncConfig = {
+      enabled: !!o.enabled,
+      auto: !!o.auto,
+      accessKeyId: String(o.accessKeyId || ''),
+      secretAccessKey: String(o.secretAccessKey || ''),
+      bucket: String(o.bucket || ''),
+      region: typeof o.region === 'string' ? o.region : undefined,
+      endpoint: typeof o.endpoint === 'string' ? o.endpoint : undefined,
+      forcePathStyle: o.forcePathStyle !== false,
+      prefix: typeof o.prefix === 'string' ? o.prefix : undefined,
+    }
+    if (!cfg.enabled) return null
+    if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) return null
+    return cfg
+  } catch { return null }
+}
+
+function showSyncOverlay(show: boolean) {
+  const overlay = document.getElementById('sync-overlay') as HTMLDivElement | null
+  if (!overlay) return
+  if (show) overlay.classList.remove('hidden'); else overlay.classList.add('hidden')
+}
+
+function ensureSyncOverlayMounted(): HTMLDivElement | null {
+  try {
+    let syn = document.getElementById('sync-overlay') as HTMLDivElement | null
+    if (syn) return syn
+    if (!containerEl) return null
+    syn = document.createElement('div'); syn.id='sync-overlay'; syn.className='upl-overlay hidden'
+    syn.innerHTML = `
+    <div class="upl-dialog" role="dialog" aria-modal="true" aria-labelledby="syn-title">
+      <div class="upl-header">
+        <div id="syn-title">同步设置（S3 / R2）</div>
+        <button id="syn-close" class="about-close" title="关闭">×</button>
+      </div>
+      <div class="upl-desc">仅支持 S3/R2。远程结构：<code>{prefix}/files/相对路径</code>；状态文件：<code>.flymd/sync-state.json</code></div>
+      <form class="upl-body" id="syn-form">
+        <div class="upl-grid">
+          <div class="upl-section-title">基础</div>
+          <label for="syn-enabled">启用</label>
+          <div class="upl-field">
+            <label class="switch"><input id="syn-enabled" type="checkbox" /><span class="trk"></span><span class="kn"></span></label>
+          </div>
+          <label for="syn-auto">自动同步</label>
+          <div class="upl-field">
+            <label class="switch"><input id="syn-auto" type="checkbox" /><span class="trk"></span><span class="kn"></span></label>
+          </div>
+          <label for="syn-ak">AccessKeyId</label>
+          <div class="upl-field"><input id="syn-ak" type="text" placeholder="必填" /></div>
+          <label for="syn-sk">SecretAccessKey</label>
+          <div class="upl-field"><input id="syn-sk" type="password" placeholder="必填" /></div>
+          <label for="syn-bucket">Bucket</label>
+          <div class="upl-field"><input id="syn-bucket" type="text" placeholder="必填" /></div>
+          <label for="syn-endpoint">自定义 Endpoint</label>
+          <div class="upl-field">
+            <input id="syn-endpoint" type="url" placeholder="如 https://xxx.r2.cloudflarestorage.com" />
+          </div>
+          <label for="syn-region">Region（可选）</label>
+          <div class="upl-field"><input id="syn-region" type="text" placeholder="R2 写 auto；S3 如 ap-southeast-1" /></div>
+          <label for="syn-pathstyle">Path-Style（R2 勾选）</label>
+          <div class="upl-field"><input id="syn-pathstyle" type="checkbox" /></div>
+          <div class="upl-section-title">远程布局</div>
+          <label for="syn-prefix">前缀 prefix</label>
+          <div class="upl-field"><input id="syn-prefix" type="text" placeholder="默认: vault/<自动生成>" /></div>
+        </div>
+        <div class="upl-actions">
+          <div id="syn-log" style="margin-right:auto;font-size:12px;color:var(--muted)"></div>
+          <button type="button" id="syn-run" class="btn-secondary">立即同步</button>
+          <button type="button" id="syn-cancel" class="btn-secondary">取消</button>
+          <button type="submit" id="syn-save" class="btn-primary">保存</button>
+        </div>
+      </form>
+    </div>`
+    containerEl.appendChild(syn)
+    return syn
+  } catch { return null }
+}
+
+function synLog(msg: string, level: 'info'|'ok'|'err' = 'info') {
+  try {
+    const el = document.getElementById('syn-log') as HTMLDivElement | null
+    if (!el) return
+    el.textContent = msg
+    el.className = level === 'ok' ? 'ok' : (level === 'err' ? 'err' : '')
+  } catch {}
+}
+
+function guessContentTypeByExt(path: string): string {
+  const e = (path.split('.').pop() || '').toLowerCase()
+  if (e === 'md' || e === 'markdown' || e === 'txt') return 'text/markdown; charset=utf-8'
+  if (e === 'pdf') return 'application/pdf'
+  if (['png','jpg','jpeg','gif','webp','svg'].includes(e)) return e === 'svg' ? 'image/svg+xml' : `image/${e === 'jpg' ? 'jpeg' : e}`
+  return 'application/octet-stream'
+}
+
+async function openSyncDialog() {
+  const syn = ensureSyncOverlayMounted()
+  if (!syn) return
+  const form = syn.querySelector('#syn-form') as HTMLFormElement
+  const inputEnabled = syn.querySelector('#syn-enabled') as HTMLInputElement
+  const inputAuto = syn.querySelector('#syn-auto') as HTMLInputElement
+  const inputAk = syn.querySelector('#syn-ak') as HTMLInputElement
+  const inputSk = syn.querySelector('#syn-sk') as HTMLInputElement
+  const inputBucket = syn.querySelector('#syn-bucket') as HTMLInputElement
+  const inputEndpoint = syn.querySelector('#syn-endpoint') as HTMLInputElement
+  const inputRegion = syn.querySelector('#syn-region') as HTMLInputElement
+  const inputPathStyle = syn.querySelector('#syn-pathstyle') as HTMLInputElement
+  const inputPrefix = syn.querySelector('#syn-prefix') as HTMLInputElement
+  const btnCancel = syn.querySelector('#syn-cancel') as HTMLButtonElement
+  const btnClose = syn.querySelector('#syn-close') as HTMLButtonElement
+  const btnRun = syn.querySelector('#syn-run') as HTMLButtonElement
+
+  // 预填
+  try {
+    const raw = store ? ((await store.get('sync')) as any) : null
+    inputEnabled.checked = !!raw?.enabled
+    inputAuto.checked = !!raw?.auto
+    inputAk.value = raw?.accessKeyId || ''
+    inputSk.value = raw?.secretAccessKey || ''
+    inputBucket.value = raw?.bucket || ''
+    inputEndpoint.value = raw?.endpoint || ''
+    inputRegion.value = raw?.region || ''
+    inputPathStyle.checked = raw?.forcePathStyle !== false
+    inputPrefix.value = raw?.prefix || ''
+  } catch {}
+
+  showSyncOverlay(true)
+
+  const onCancel = () => { showSyncOverlay(false) }
+  const onOverlay = (e: MouseEvent) => { if (e.target === syn) onCancel() }
+  const onSubmit = async (e: Event) => {
+    e.preventDefault()
+    try {
+      const cfg = {
+        enabled: !!inputEnabled.checked,
+        auto: !!inputAuto.checked,
+        accessKeyId: inputAk.value.trim(),
+        secretAccessKey: inputSk.value.trim(),
+        bucket: inputBucket.value.trim(),
+        endpoint: inputEndpoint.value.trim() || undefined,
+        region: inputRegion.value.trim() || undefined,
+        forcePathStyle: !!inputPathStyle.checked,
+        prefix: (inputPrefix.value.trim() || undefined),
+      }
+      if (cfg.enabled) {
+        if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) { alert('启用同步需要 AccessKeyId/SecretAccessKey/Bucket'); return }
+      }
+      if (store) { await store.set('sync', cfg); await store.save() }
+      showSyncOverlay(false)
+      pluginNotice('同步设置已保存', 'ok', 1200)
+    } catch (e) { showError('保存同步设置失败', e) }
+  }
+  form.addEventListener('submit', onSubmit)
+  btnCancel.addEventListener('click', onCancel)
+  btnClose.addEventListener('click', onCancel)
+  syn.addEventListener('click', onOverlay)
+
+  btnRun.addEventListener('click', async () => { try { await performSyncInteractive() } catch (e) { showError('同步失败', e) } })
+}
+
+async function performSyncInteractive() {
+  const cfg = await getSyncConfig()
+  if (!cfg) { alert('请先在“同步设置”中启用并填写 S3/R2 参数'); return }
+  synLog('准备中...')
+  await performSync(cfg, (m) => synLog(m))
+}
+
+async function scheduleSync() {
+  if (_syncDebounce) return
+  _syncDebounce = true
+  setTimeout(async () => { _syncDebounce = false; try { const cfg = await getSyncConfig(); if (cfg && cfg.auto) await performSync(cfg) } catch (e) { console.warn('auto-sync error', e) } }, 1600)
+}
+
+async function performSync(cfg: SyncConfig, onlog?: (m: string) => void) {
+  const log = (m: string) => { try { onlog ? onlog(m) : console.log('[sync]', m) } catch {} }
+  try {
+    const root = await getLibraryRoot()
+    if (!root) { log('未选择库目录'); return }
+    const sep = root.includes('\\') ? '\\' : '/'
+    const statePath = `${root}${sep}.flymd${sep}sync-state.json`
+    const stateDir = `${root}${sep}.flymd`
+    try { await mkdir(stateDir as any, { recursive: true } as any) } catch {}
+
+    // 读取状态
+    let state: any = {}
+    try { state = JSON.parse(await readTextFileAnySafe(statePath) as any) } catch { state = {} }
+    if (!state.vaultId) { state.vaultId = Math.random().toString(36).slice(2) + Date.now().toString(36) }
+    if (!state.deviceId) { state.deviceId = navigator.platform + '-' + Math.random().toString(36).slice(2) }
+    if (!state.files) state.files = {}
+    const prefix = (cfg.prefix && cfg.prefix.trim()) ? cfg.prefix.trim() : `vault/${state.vaultId}`
+
+    // 扫描本地
+    log('扫描本地...')
+    const allow = new Set(['md','markdown','txt','pdf','png','jpg','jpeg','gif','webp','svg'])
+    const locals: Record<string, LocalMeta> = {}
+    async function walk(dir: string, baseRel: string) {
+      let ents: any[] = []
+      try { ents = await readDir(dir as any, { recursive: false } as any) as any[] } catch { ents = [] }
+      for (const it of ents) {
+        const p = String((it as any).path || '')
+        const name = String((it as any).name || '')
+        if (!name) continue
+        if (name === '.git' || name === '.flymd' || name === 'node_modules') continue
+        const rel = baseRel ? baseRel + '/' + name : name
+        if ((it as any).isDir) { await walk(p, rel) }
+        else {
+          const ext = (name.split('.').pop() || '').toLowerCase()
+          if (!allow.has(ext)) continue
+          let st: any; try { st = await stat(p as any) } catch { st = null }
+          locals[rel] = { size: Number(st?.size || 0), mtime: Number((st?.mtimeMs ?? st?.modifiedAt ?? 0) || 0) }
+        }
+      }
+    }
+    await walk(root, '')
+
+    // 列远程
+    log('列出远程...')
+    const list: { key: string; size: number; etag?: string; last_modified_ms?: number }[] = await invoke('s3_list_objects', {
+      req: { conn: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey, bucket: cfg.bucket, region: cfg.region, endpoint: cfg.endpoint, forcePathStyle: cfg.forcePathStyle !== false }, prefix: `${prefix}/files/` }
+    })
+    const remotes: Record<string, RemoteMeta> = {}
+    for (const o of list || []) {
+      let key = String((o as any).key || '')
+      if (!key) continue
+      if (!key.startsWith(`${prefix}/files/`)) continue
+      const rel = key.slice((`${prefix}/files/`).length)
+      remotes[rel] = { size: Number((o as any).size || 0), etag: (o as any).etag || undefined, lastModified: Number((o as any).last_modified_ms || 0) }
+    }
+
+    // 计划
+    type Plan = { kind: 'upload' | 'download'; path: string }[]
+    const plan: Plan = []
+    const all = new Set<string>([...Object.keys(locals), ...Object.keys(remotes)])
+    const now = Date.now()
+    for (const rel of all) {
+      const l = locals[rel]
+      const r = remotes[rel]
+      if (l && !r) plan.push({ kind: 'upload', path: rel })
+      else if (!l && r) plan.push({ kind: 'download', path: rel })
+      else if (l && r) {
+        const lm = Number(l.mtime || 0)
+        const rm = Number(r.lastModified || 0)
+        if (Math.abs(lm - rm) <= 1000 && l.size === r.size) continue
+        if (lm >= rm) plan.push({ kind: 'upload', path: rel })
+        else plan.push({ kind: 'download', path: rel })
+      }
+    }
+
+    log(`需执行 ${plan.length} 项`)
+
+    // 执行
+    for (let i = 0; i < plan.length; i++) {
+      const op = plan[i]
+      if (op.kind === 'upload') {
+        const full = root + sep + op.path.replace(/[\\/]+/g, '/').split('/').join(sep)
+        let data: Uint8Array
+        try { const buf = await readFile(full as any); data = new Uint8Array(buf as any) } catch (e) { log(`读取失败: ${op.path}`); continue }
+        const key = `${prefix}/files/${op.path}`
+        const contentType = guessContentTypeByExt(op.path)
+        try {
+          await invoke('upload_to_s3', { req: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey, bucket: cfg.bucket, region: cfg.region, endpoint: cfg.endpoint, forcePathStyle: cfg.forcePathStyle !== false, aclPublicRead: false, customDomain: null, key, contentType, bytes: Array.from(data) } })
+          log(`↑ ${i+1}/${plan.length} 上传: ${op.path}`)
+        } catch (e) { log(`上传失败: ${op.path}`); throw e }
+      } else if (op.kind === 'download') {
+        const full = root + sep + op.path.replace(/[\\/]+/g, '/').split('/').join(sep)
+        const key = `${prefix}/files/${op.path}`
+        try {
+          await invoke('s3_get_object_to_path', { req: { conn: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey, bucket: cfg.bucket, region: cfg.region, endpoint: cfg.endpoint, forcePathStyle: cfg.forcePathStyle !== false }, key, destPath: full } })
+          log(`↓ ${i+1}/${plan.length} 下载: ${op.path}`)
+        } catch (e) { log(`下载失败: ${op.path}`); throw e }
+      }
+    }
+
+    // 结束
+    state.lastSyncAt = Date.now()
+    try { await writeTextFileAnySafe(statePath, JSON.stringify(state, null, 2)) } catch {}
+    log('完成', 'ok')
+  } catch (e) {
+    console.warn('performSync error', e)
+    try { onlog ? onlog('同步出错') : null } catch {}
+  }
+}
+
+async function tryAutoSyncAfterSave() {
+  try { const cfg = await getSyncConfig(); if (cfg && cfg.auto) await scheduleSync() } catch {}
+}
+// ===== CODEX SYNC (S3/R2) END =====
 
 
 
