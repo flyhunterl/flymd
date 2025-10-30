@@ -123,19 +123,25 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
   // 仅展示指定后缀的文档（md / markdown / txt / pdf）
   const allow = new Set(['md', 'markdown', 'txt', 'pdf'])
   for (const it of ents) {
+  const needMtime = (state.sortMode === 'mtime_asc' || state.sortMode === 'mtime_desc')
     const p: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
-    let isDir = false
+    let isDir = !!(it as any)?.isDirectory
     let st: any = null
-    try { st = await stat(p) as any; isDir = !!st?.isDirectory } catch { isDir = false }
+    if ((it as any)?.isDirectory === undefined) {
+      try { st = await stat(p) as any; isDir = !!st?.isDirectory } catch { isDir = false }
+    }
+    if (!st && needMtime) {
+      try { st = await stat(p) as any } catch {}
+    }
     if (isDir) {
       // 仅保留“包含受支持文档(递归)”的目录
       if (await dirHasSupportedDocRecursive(p, allow)) {
-        dirs.push({ name: nameOf(p), path: p, isDir: true, mtime: toMtimeMs(st) })
+        dirs.push({ name: nameOf(p), path: p, isDir: true, mtime: needMtime ? toMtimeMs(st) : undefined })
       }
     } else {
       const nm = nameOf(p)
       const ext = (nm.split('.').pop() || '').toLowerCase()
-      if (allow.has(ext)) items.push({ name: nm, path: p, isDir: false, mtime: toMtimeMs(st) })
+       if (allow.has(ext)) items.push({ name: nm, path: p, isDir: false, mtime: needMtime ? toMtimeMs(st) : undefined })
     }
   }
   const byNameAsc = (a: any, b: any) => a.name.localeCompare(b.name)
@@ -165,7 +171,7 @@ async function dirHasSupportedDocRecursive(dir: string, allow: Set<string>, dept
       for (const it of (entries || [])) {
         const full: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
         let isDir = false
-        try { isDir = !!(await stat(full) as any)?.isDirectory } catch { isDir = false }
+         if ((it as any)?.isDirectory !== undefined) { isDir = !!(it as any)?.isDirectory } else { try { isDir = !!(await stat(full) as any)?.isDirectory } catch { isDir = false } }
         if (!isDir) {
           const nm = nameOf(full)
           const ext = (nm.split('.').pop() || '').toLowerCase()
@@ -176,7 +182,7 @@ async function dirHasSupportedDocRecursive(dir: string, allow: Set<string>, dept
       for (const it of (entries || [])) {
         const full: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
         let isDir = false
-        try { isDir = !!(await stat(full) as any)?.isDirectory } catch { isDir = false }
+         if ((it as any)?.isDirectory !== undefined) { isDir = !!(it as any)?.isDirectory } else { try { isDir = !!(await stat(full) as any)?.isDirectory } catch { isDir = false } }
         if (isDir) {
           const ok = await dirHasSupportedDocRecursive(full, allow, depth - 1)
           if (ok) { hasDocCache.set(dir, true); return true }

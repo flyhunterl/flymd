@@ -5,7 +5,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.0.7-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.0.8-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -66,6 +66,15 @@
   - Tauri：`tauri://drag-drop`；拖拽 `.md` 打开、拖拽图片自动插入 Markdown
   - 浏览器：拖拽 `.md` 在未保存时先确认；拖拽图片自动插入 data URL
 
+### 图床支持
+- 支持S3/R2图床设置，粘贴/拖动图片直接上传图床 方便网络分发
+**默认优先级**
+      - 已启用并配置图床→直接上传并插入公网 URL（本地不保存）
+      - 未启用/未配置图床→走本地落盘分支 [已创建文档：同级 images；未创建文档：系统图片目录]
+      - 若图床已开启但上传失败→回退到本地落盘分支作为兜底
+      - 本地已存在的图片将以路径读取不写入images目录
+
+
 ### 🎨 界面体验
 - Windows 记事本风格菜单栏
 - 跟随系统主题（浅色/深色）
@@ -95,7 +104,7 @@
 ### 安装使用（推荐）
 
 1. 前往 [Releases](https://github.com/flyhunterl/flymd/releases) 下载最新版本
-2. 运行 `flymd_0.0.6_x64_setup.exe` 安装（文件名以实际发布为准）
+2. 运行 `flymd_0.0.8_x64_setup.exe` 安装（文件名以实际发布为准）
 3. 启动 flyMD，开始使用
 
 ## ⌨️ 快捷键
@@ -123,7 +132,24 @@
 
 ## 🗺️ 路线图
 
-## 更新 v.0.07
+## 更新 v.0.0.8-fix
+- 修复之前拼接错误的更新连接导致的自动关下载失败
+- 新增几个备用的代理地址以免代理失效导致更新失败
+
+
+## 更新 v.0.0.8
+- 修复：未设置图床的时候从剪切板粘贴图片回退成base64
+- 新增: 未设置图床时粘贴板粘贴图片时将写入本地images目录
+[本地已存在的图片将以路径读取不写入images目录]
+[未保存的文档粘贴图片将放到系统默认图片目录，失败则返回为base64]
+**默认优先级**
+  - 已启用并配置图床→直接上传并插入公网 URL（本地不保存）
+  - 未启用/未配置图床→走本地落盘分支[已创建文档：同级 images；未创建文档：系统图片目录]
+  - 若图床已开启但上传失败→回退到本地落盘分支作为兜底
+  - 本地已存在的图片将以路径读取不写入images目录
+
+
+## 更新 v.0.0.7
 - 新增：文件库自定义排序
 - 新增：文件库隐藏md/txt/pdf/markdown以外的文件
 - 新增：更新检测和下载功能
