@@ -462,11 +462,11 @@ const app = document.getElementById('app')!
 app.innerHTML = `
   <div class="titlebar">
     <div class="menubar">
+      <div class="menu-item" id="btn-new" title="新建 (Ctrl+N)">新建</div>
       <div class="menu-item" id="btn-open" title="打开 (Ctrl+O)">文件</div>
       <div class="menu-item" id="btn-save" title="保存 (Ctrl+S)">保存</div>
       <div class="menu-item" id="btn-saveas" title="另存为 (Ctrl+Shift+S)">另存为</div>
       <div class="menu-item" id="btn-toggle" title="编辑/预览 (Ctrl+E)">预览</div>
-      <div class="menu-item" id="btn-new" title="新建 (Ctrl+N)">新建</div>
     </div>
     <div class="filename" id="filename">未命名</div>
   </div>
