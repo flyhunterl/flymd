@@ -479,6 +479,7 @@ app.innerHTML = `
       <div class="menu-item" id="btn-save" title="保存 (Ctrl+S)">保存</div>
       <div class="menu-item" id="btn-saveas" title="另存为 (Ctrl+Shift+S)">另存为</div>
       <div class="menu-item" id="btn-toggle" title="编辑/预览 (Ctrl+E)">预览</div>
+      <div class="menu-item" id="btn-extensions" title="扩展与插件管理">扩展</div>
     </div>
     <div class="filename" id="filename">未命名</div>
   </div>
