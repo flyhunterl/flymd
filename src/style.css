@@ -596,3 +596,18 @@ html, body { overflow: hidden; }
 .container.wysiwyg .preview .katex-display { /* 块级公式也稍作留白，防止与段落挤在一起 */
   margin: 0.6em 0;
 }
+
+/* 隐藏底部横向滚动条外观（不影响滚动功能） */
+html::-webkit-scrollbar:horizontal,
+body::-webkit-scrollbar:horizontal,
+#app::-webkit-scrollbar:horizontal,
+.container::-webkit-scrollbar:horizontal,
+.preview::-webkit-scrollbar:horizontal {
+  height: 0 !important;
+}
+/* 全环境隐藏滚动条外观（仍可滚动）*/
+/* Firefox */
+html, body, #app, .container, .preview { scrollbar-width: none; }
+/* WebKit/Chromium */
+html::-webkit-scrollbar, body::-webkit-scrollbar, #app::-webkit-scrollbar,
+.container::-webkit-scrollbar, .preview::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
