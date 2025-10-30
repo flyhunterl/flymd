@@ -28,6 +28,7 @@ import { uploadImageToS3R2, type UploaderConfig } from './uploader/s3'
 import appIconUrl from '../flymd.png?url'
 import { decorateCodeBlocks } from './decorate'
 import pkg from '../package.json'
+import { htmlToMarkdown } from './html2md'
 // 应用版本号（用于窗口标题/关于弹窗）
 const APP_VERSION: string = (pkg as any)?.version ?? '0.0.0'
 
@@ -3166,11 +3167,51 @@ function bindEvents() {
   })
   editor.addEventListener('keyup', refreshStatus)
   editor.addEventListener('click', refreshStatus)
-  // 粘贴图片到编辑器：占位符 + 异步上传，不阻塞编辑
+  // 粘贴到编辑器：优先将 HTML 转译为 Markdown；其次处理图片文件占位+异步上传；否则走默认粘贴
   editor.addEventListener('paste', guard(async (e: ClipboardEvent) => {
     try {
       const dt = e.clipboardData
       if (!dt) return
+
+      // 1) 处理 HTML → Markdown（像 Typora 那样保留格式）
+      try {
+        const hasHtmlType = (dt.types && Array.from(dt.types).some(t => String(t).toLowerCase() === 'text/html'))
+        const html = hasHtmlType ? dt.getData('text/html') : ''
+        if (html && html.trim()) {
+          // 粗略判断是否为“富文本”而非纯文本包装，避免过度拦截
+          const looksRich = /<\s*(p|div|h[1-6]|ul|ol|li|pre|table|img|a|blockquote|strong|em|b|i|code)[\s>]/i.test(html)
+          if (looksRich) {
+            // 按需加载 DOMPurify 做一次基本清洗，避免恶意剪贴板 HTML 注入
+            let safe = html
+            // 提取 base href 以便相对链接转绝对（若存在）
+            let baseUrl: string | undefined
+            try {
+              const m = html.match(/<base\s+href=["']([^"']+)["']/i)
+              if (m && m[1]) baseUrl = m[1]
+            } catch {}
+            try {
+              if (!sanitizeHtml) {
+                const mod: any = await import('dompurify')
+                const DOMPurify = mod?.default || mod
+                sanitizeHtml = (h: string, cfg?: any) => DOMPurify.sanitize(h, cfg)
+              }
+              safe = sanitizeHtml!(html)
+            } catch {}
+
+            // 转成 Markdown 文本
+            const mdText = htmlToMarkdown(safe, { baseUrl })
+            if (mdText && mdText.trim()) {
+              e.preventDefault()
+              insertAtCursor(mdText)
+              if (mode === 'preview') await renderPreview()
+              else if (wysiwyg) scheduleWysiwygRender()
+              return
+            }
+          }
+        }
+      } catch {}
+
+      // 2) 若包含图片文件，使用占位 + 异步上传
       const items = Array.from(dt.items || [])
       const imgItem = items.find((it) => it.kind === 'file' && /^image\//i.test(it.type))
       if (!imgItem) return
