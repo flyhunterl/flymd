@@ -1128,6 +1128,14 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
               <span class="trk"></span><span class="kn"></span>
             </label>
           </div>
+          <label for="upl-always-local">总是保存到本地</label>
+          <div class="upl-field">
+            <label class="switch">
+              <input id="upl-always-local" type="checkbox" />
+              <span class="trk"></span><span class="kn"></span>
+            </label>
+            <div class="upl-hint">开启后，无论图床是否启用，粘贴/拖拽/链接插入的图片都会复制到当前文档同目录的 images 文件夹，并立即生效</div>
+          </div>
           <label for="upl-ak">AccessKeyId</label>
           <div class="upl-field"><input id="upl-ak" type="text" placeholder="必填" /></div>
           <label for="upl-sk">SecretAccessKey</label>
@@ -2493,6 +2501,16 @@ function showUploaderOverlay(show: boolean) {
   else overlay.classList.add('hidden')
 }
 
+// 读取“总是保存到本地”配置
+async function getAlwaysSaveLocalImages(): Promise<boolean> {
+  try {
+    if (!store) return false
+    const up = await store.get('uploader')
+    if (!up || typeof up !== 'object') return false
+    return !!(up as any).alwaysLocal
+  } catch { return false }
+}
+
 
 // 简单的连通性测试：只验证 Endpoint 可达性（不进行真实上传）
 async function testUploaderConnectivity(endpoint: string): Promise<{ ok: boolean; status: number; note: string }> {
@@ -2522,6 +2540,7 @@ async function openUploaderDialog() {
   if (!overlay || !form) return
 
   const inputEnabled = overlay.querySelector('#upl-enabled') as HTMLInputElement
+  const inputAlwaysLocal = overlay.querySelector('#upl-always-local') as HTMLInputElement
   const inputAk = overlay.querySelector('#upl-ak') as HTMLInputElement
   const inputSk = overlay.querySelector('#upl-sk') as HTMLInputElement
   const inputBucket = overlay.querySelector('#upl-bucket') as HTMLInputElement
@@ -2541,6 +2560,7 @@ async function openUploaderDialog() {
     if (store) {
       const up = (await store.get('uploader')) as any
       inputEnabled.checked = !!up?.enabled
+      inputAlwaysLocal.checked = !!up?.alwaysLocal
       inputAk.value = up?.accessKeyId || ''
       inputSk.value = up?.secretAccessKey || ''
       inputBucket.value = up?.bucket || ''
@@ -2560,6 +2580,7 @@ async function openUploaderDialog() {
       try {
         const cfg = {
           enabled: !!inputEnabled.checked,
+          alwaysLocal: !!inputAlwaysLocal.checked,
           accessKeyId: inputAk.value.trim(),
           secretAccessKey: inputSk.value.trim(),
           bucket: inputBucket.value.trim(),
@@ -2570,7 +2591,7 @@ async function openUploaderDialog() {
           forcePathStyle: !!inputPathStyle.checked,
           aclPublicRead: !!inputAcl.checked,
         }
-        if (cfg.enabled) {
+        if (cfg.enabled && !cfg.alwaysLocal) {
           if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) {
             alert('启用上传需要 AccessKeyId、SecretAccessKey、Bucket');
             inputEnabled.checked = false
@@ -2581,6 +2602,7 @@ async function openUploaderDialog() {
       } catch (e) { console.warn('即时应用图床开关失败', e) }
     }
     inputEnabled.addEventListener('change', () => { void applyImmediate() })
+    inputAlwaysLocal.addEventListener('change', () => { void applyImmediate() })
   } catch {}
 
   const onCancel = () => { showUploaderOverlay(false) }
@@ -2589,6 +2611,7 @@ async function openUploaderDialog() {
     try {
       const cfg = {
         enabled: !!inputEnabled.checked,
+        alwaysLocal: !!inputAlwaysLocal.checked,
         accessKeyId: inputAk.value.trim(),
         secretAccessKey: inputSk.value.trim(),
         bucket: inputBucket.value.trim(),
@@ -2599,7 +2622,7 @@ async function openUploaderDialog() {
         forcePathStyle: !!inputPathStyle.checked,
         aclPublicRead: !!inputAcl.checked,
       }
-      if (cfg.enabled) {
+      if (cfg.enabled && !cfg.alwaysLocal) {
         if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) {
           alert('启用直传时 AccessKeyId、SecretAccessKey、Bucket 为必填');
           return
@@ -3274,6 +3297,72 @@ function bindEvents() {
         return
       }
       if (files.length > 0) {
+        // Always-save-local: prefer local images folder
+        try {
+          const alwaysLocal = await getAlwaysSaveLocalImages()
+          if (alwaysLocal) {
+            const imgFiles = files.filter((f) => extIsImage(f.name) || (f.type && f.type.startsWith('image/')))
+            if (imgFiles.length > 0) {
+              const partsLocal: string[] = []
+              if (isTauriRuntime() && currentFilePath) {
+                const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
+                const sep = base.includes('\\') ? '\\' : '/'
+                const imgDir = base + sep + 'images'
+                try { await ensureDir(imgDir) } catch {}
+                for (const f of imgFiles) {
+                  try {
+                    const dst = imgDir + sep + f.name
+                    const buf = new Uint8Array(await f.arrayBuffer())
+                    await writeFile(dst as any, buf as any)
+                    const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+                    const mdUrl = needAngle ? `<${dst}>` : dst
+                    partsLocal.push(`![${f.name}](${mdUrl})`)
+                  } catch {}
+                }
+                if (partsLocal.length > 0) {
+                  insertAtCursor(partsLocal.join('\n'))
+                  if (mode === 'preview') await renderPreview()
+                  else if (wysiwyg) scheduleWysiwygRender()
+                  return
+                }
+              } else if (isTauriRuntime() && !currentFilePath) {
+                const dir = await getDefaultPasteDir()
+                if (dir) {
+                  const baseDir = dir.replace(/[\\/]+$/, '')
+                  const sep = baseDir.includes('\\') ? '\\' : '/'
+                  try { await ensureDir(baseDir) } catch {}
+                  for (const f of imgFiles) {
+                    try {
+                      const dst = baseDir + sep + f.name
+                      const buf = new Uint8Array(await f.arrayBuffer())
+                      await writeFile(dst as any, buf as any)
+                      const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+                      const mdUrl = needAngle ? `<${dst}>` : dst
+                      partsLocal.push(`![${f.name}](${mdUrl})`)
+                    } catch {}
+                  }
+                  if (partsLocal.length > 0) {
+                    insertAtCursor(partsLocal.join('\n'))
+                    if (mode === 'preview') await renderPreview()
+                    else if (wysiwyg) scheduleWysiwygRender()
+                    return
+                  }
+                }
+              }
+              // Fallback to data URLs
+              const partsData: string[] = []
+              for (const f of imgFiles) {
+                try { const url = await fileToDataUrl(f); partsData.push(`![${f.name}](${url})`) } catch {}
+              }
+              if (partsData.length > 0) {
+                insertAtCursor(partsData.join('\n'))
+                if (mode === 'preview') await renderPreview()
+                else if (wysiwyg) scheduleWysiwygRender()
+                return
+              }
+            }
+          }
+        } catch {}
         // 优先检查是否有 MD 文件（浏览器环境）
         const mdFile = files.find((f) => /\.(md|markdown|txt)$/i.test(f.name))
         if (mdFile) {
@@ -3444,6 +3533,36 @@ function bindEvents() {
             if (md) { void openFile2(md); return }
             const imgs = paths.filter((p) => /\.(png|jpe?g|gif|svg|webp|bmp|avif|ico)$/i.test(p))
             if (imgs.length > 0) {
+              // Always-save-local: prefer local images folder for dropped files
+              try {
+                const alwaysLocal = await getAlwaysSaveLocalImages()
+                if (alwaysLocal) {
+                  const partsLocal: string[] = []
+                  if (isTauriRuntime() && currentFilePath) {
+                    const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
+                    const sep = base.includes('\\') ? '\\' : '/'
+                    const imgDir = base + sep + 'images'
+                    try { await ensureDir(imgDir) } catch {}
+                    for (const p of imgs) {
+                      try {
+                        const name = (p.split(/[\\/]+/).pop() || 'image')
+                        const dst = imgDir + sep + name
+                        const bytes = await readFile(p as any)
+                        await writeFile(dst as any, bytes as any)
+                        const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+                        const mdUrl = needAngle ? `<${dst}>` : dst
+                        partsLocal.push(`![${name}](${mdUrl})`)
+                      } catch {}
+                    }
+                    if (partsLocal.length > 0) {
+                      insertAtCursor(partsLocal.join('\n'))
+                      if (mode === 'preview') await renderPreview()
+                      else if (wysiwyg) scheduleWysiwygRender()
+                      return
+                    }
+                  }
+                }
+              } catch {}
               // 若启用直连上传，优先尝试上传到 S3/R2
               try {
                 const upCfg = await getUploaderConfig()
@@ -3610,6 +3729,55 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
   insertAtCursor(`![${fname || 'image'}](uploading://${id})`)
   void (async () => {
     try {
+      const alwaysLocal = await getAlwaysSaveLocalImages()
+      if (alwaysLocal) {
+        // 优先保存到当前文档同目录 images/
+        try {
+          if (isTauriRuntime() && currentFilePath) {
+            const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
+            const sep = base.includes('\\') ? '\\' : '/'
+            const imgDir = base + sep + 'images'
+            try { await ensureDir(imgDir) } catch {}
+            const dst = imgDir + sep + fname
+            try {
+              const buf = new Uint8Array(await file.arrayBuffer())
+              await writeFile(dst as any, buf as any)
+              const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+              const mdUrl = needAngle ? `<${dst}>` : dst
+              replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
+              return
+            } catch {}
+          }
+        } catch {}
+        // 未保存的文档：尝试默认粘贴目录
+        try {
+          if (isTauriRuntime() && !currentFilePath) {
+            const dir = await getDefaultPasteDir()
+            if (dir) {
+              const baseDir = dir.replace(/[\\/]+$/, '')
+              const sep = baseDir.includes('\\') ? '\\' : '/'
+              const dst = baseDir + sep + fname
+              try {
+                const buf = new Uint8Array(await file.arrayBuffer())
+                try { await ensureDir(baseDir) } catch {}
+                await writeFile(dst as any, buf as any)
+                const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+                const mdUrl = needAngle ? `<${dst}>` : dst
+                replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
+                return
+              } catch {}
+            }
+          }
+        } catch {}
+        // 兜底：data URL
+        try {
+          const dataUrl = await fileToDataUrl(file)
+          replaceUploadingPlaceholder(id, `![${fname}](${dataUrl})`)
+          return
+        } catch {}
+      }
+    } catch {}
+    try {
       const upCfg = await getUploaderConfig()
       if (upCfg) {
         const res = await uploadImageToS3R2(file, fname, file.type || 'application/octet-stream', upCfg)
@@ -3706,6 +3874,53 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   const id = genUploadId()
   insertAtCursor(`![${fname || 'image'}](uploading://${id})`)
   void (async () => {
+    try {
+      const alwaysLocal = await getAlwaysSaveLocalImages()
+      if (alwaysLocal) {
+        try {
+          if (isTauriRuntime() && currentFilePath) {
+            const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
+            const sep = base.includes('\\') ? '\\' : '/'
+            const imgDir = base + sep + 'images'
+            try { await ensureDir(imgDir) } catch {}
+            const dst = imgDir + sep + fname
+            try {
+              const bytes = new Uint8Array(await blob.arrayBuffer())
+              await writeFile(dst as any, bytes as any)
+              const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+              const mdUrl = needAngle ? `<${dst}>` : dst
+              replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
+              return
+            } catch {}
+          }
+        } catch {}
+        try {
+          if (isTauriRuntime() && !currentFilePath) {
+            const dir = await getDefaultPasteDir()
+            if (dir) {
+              const baseDir = dir.replace(/[\\/]+$/, '')
+              const sep = baseDir.includes('\\') ? '\\' : '/'
+              const dst = baseDir + sep + fname
+              try {
+                const bytes = new Uint8Array(await blob.arrayBuffer())
+                try { await ensureDir(baseDir) } catch {}
+                await writeFile(dst as any, bytes as any)
+                const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
+                const mdUrl = needAngle ? `<${dst}>` : dst
+                replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
+                return
+              } catch {}
+            }
+          }
+        } catch {}
+        try {
+          const f = new File([blob], fname, { type: mime || 'application/octet-stream' })
+          const dataUrl = await fileToDataUrl(f)
+          replaceUploadingPlaceholder(id, `![${fname}](${dataUrl})`)
+          return
+        } catch {}
+      }
+    } catch {}
     try {
       const upCfg = await getUploaderConfig()
       if (upCfg) {
