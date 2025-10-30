@@ -369,7 +369,13 @@ fn is_better(a: &(i64,i64,i64,i64), b: &(i64,i64,i64,i64)) -> bool {
 }
 
 #[derive(Debug, Deserialize)]
-struct GhAsset { name: String, browser_download_url: String, size: Option<u64>, content_type: Option<String> }
+struct GhAsset {
+  name: String,
+  browser_download_url: String,
+  size: Option<u64>,
+  #[allow(dead_code)]
+  content_type: Option<String>,
+}
 #[derive(Debug, Deserialize)]
 struct GhRelease {
   tag_name: String,
@@ -511,6 +517,7 @@ async fn check_update(_force: Option<bool>, include_prerelease: Option<bool>) ->
 }
 
 #[tauri::command]
+#[allow(unused_assignments)]
 async fn download_file(url: String, use_proxy: Option<bool>) -> Result<String, String> {
   let client = reqwest::Client::builder()
     .user_agent("flymd-updater")
