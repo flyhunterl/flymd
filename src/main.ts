@@ -924,6 +924,20 @@ const aboutBtn = document.createElement('div')
       updBtn.textContent = '\u66f4\u65b0'
       menubar.appendChild(updBtn)
       menubar.appendChild(aboutBtn)
+      // 将“扩展”按钮移到窗口最右侧（紧随文件名标签之后，靠右）
+      try {
+        const titlebar = document.querySelector('.titlebar') as HTMLDivElement | null
+        const extBtn = document.getElementById('btn-extensions') as HTMLDivElement | null
+        const fileNameEl = document.querySelector('.titlebar .filename') as HTMLDivElement | null
+        if (titlebar && extBtn) {
+          try { extBtn.remove() } catch {}
+          if (fileNameEl && fileNameEl.parentElement === titlebar) {
+            titlebar.insertBefore(extBtn, fileNameEl.nextSibling)
+          } else {
+            titlebar.appendChild(extBtn)
+          }
+        }
+      } catch {}
 }
 const containerEl = document.querySelector('.container') as HTMLDivElement
   if (containerEl) {
