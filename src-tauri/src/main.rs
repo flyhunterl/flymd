@@ -383,7 +383,7 @@ struct GhRelease {
 
 fn gh_proxy_url(raw: &str) -> String {
   // 代理前缀：按“https://gh-proxy.comb/原始URL”拼接
-  let prefix = "https://gh-proxy.comb/";
+  let prefix = "https://gh-proxy.com/";
   if raw.starts_with(prefix) { raw.to_string() } else { format!("{}{}", prefix, raw) }
 }
 

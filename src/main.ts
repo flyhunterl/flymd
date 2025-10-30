@@ -1926,7 +1926,10 @@ function setUpdateBadge(on: boolean, tip?: string) {
     if (!btn) return
     if (on) {
       btn.classList.add('has-update')
-      if (tip) btn.title = tip
+      if (tip) {
+        // 清理“vv0.x.y”双v问题：将" vv"规整为" v"
+        btn.title = tip.replace(' vv', ' v')
+      }
     } else {
       btn.classList.remove('has-update')
     }
@@ -1974,10 +1977,10 @@ function showUpdateOverlayLinux(resp: CheckUpdateResp) {
     return b
   }
   if (resp.assetLinuxAppimage) {
-    mkBtn('下载 AppImage（代理）', () => { void openInBrowser(resp.assetLinuxAppimage!.proxyUrl) })
+    mkBtn('下载 AppImage（代理）', () => { void openInBrowser('https://gh-proxy.com/' + resp.assetLinuxAppimage!.directUrl) })
   }
   if (resp.assetLinuxDeb) {
-    mkBtn('下载 DEB（代理）', () => { void openInBrowser(resp.assetLinuxDeb!.proxyUrl) })
+    mkBtn('下载 DEB（代理）', () => { void openInBrowser('https://gh-proxy.com/' + resp.assetLinuxDeb!.directUrl) })
   }
   mkBtn('前往发布页', () => { void openInBrowser(resp.htmlUrl) })
   mkBtn('关闭', () => ov.classList.add('hidden'))
@@ -1997,7 +2000,26 @@ async function checkUpdateInteractive() {
       if (!ok) { upMsg('已取消更新'); return }
       try {
         upMsg('正在下载安装包…')
-        const savePath = await invoke('download_file', { url: resp.assetWin.proxyUrl || resp.assetWin.directUrl, useProxy: true }) as any as string
+        let savePath = ''
+        {
+          const direct = resp.assetWin.directUrl
+          const urls = [
+            'https://gh-proxy.com/' + direct,
+            'https://cdn.gh-proxy.com/' + direct,
+            'https://edgeone.gh-proxy.com/' + direct,
+            direct,
+          ]
+          let ok = false
+          for (const u of urls) {
+            try {
+              // 传 useProxy: false，避免后端二次拼接代理
+              savePath = await invoke('download_file', { url: u, useProxy: false }) as any as string
+              ok = true
+              break
+            } catch {}
+          }
+          if (!ok) throw new Error('all proxies failed')
+        }
         upMsg('下载完成，正在启动安装…')
         try { await openPath(savePath) } catch { /* 回退：不提示失败，尽量不打断 */ }
       } catch (e) {
