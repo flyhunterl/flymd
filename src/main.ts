@@ -4301,7 +4301,7 @@ actions.appendChild(btnSettings)
     btnInstall.addEventListener('click', async () => {
       try {
         btnInstall.textContent = '安装中...'; (btnInstall as HTMLButtonElement).disabled = true
-        const rec = await installPluginFromGit('TGU-HansJack/typecho-publisher-flymd@main')
+        const rec = await installPluginFromGit('TGU-HansJack/typecho-publisher-flymd@http')
         await activatePlugin(rec)
         await refreshExtensionsUI()
         pluginNotice('安装成功', 'ok', 1500)
