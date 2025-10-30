@@ -1,4 +1,4 @@
-/*
+﻿/*
   flymd 主入口（中文注释）
   - 极简编辑器：<textarea>
   - Ctrl+E 切换编辑/预览
@@ -878,7 +878,14 @@ if (menubar) {
   } else {
     menubar.insertBefore(libBtn, menubar.firstChild)
   }
-  const aboutBtn = document.createElement('div')
+    // ensure new button is after library button
+  try {
+    const newBtnRef = document.getElementById('btn-new') as HTMLDivElement | null
+    if (newBtnRef && newBtnRef.parentElement === menubar) {
+      menubar.insertBefore(newBtnRef, libBtn.nextSibling)
+    }
+  } catch {}
+const aboutBtn = document.createElement('div')
   aboutBtn.id = 'btn-about'
   aboutBtn.className = 'menu-item'
   aboutBtn.title = '关于'
