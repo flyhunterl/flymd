@@ -1,4 +1,4 @@
-import { readDir, stat, mkdir, rename, remove, exists, writeTextFile, writeFile, readFile, watchImmediate } from '@tauri-apps/plugin-fs'
+﻿import { readDir, stat, mkdir, rename, remove, exists, writeTextFile, writeFile, readFile, watchImmediate } from '@tauri-apps/plugin-fs'
 import appIconUrl from '../flymd.png?url'
 
 export type FileTreeOptions = {
@@ -270,6 +270,7 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
             await moveFileSafe(src, dst)
           }
           await api.refresh()
+      try { (window as any).flymdScheduleSync?.() } catch {}
           console.log('[拖动] 移动完成:', src, '→', dst)
         } catch (err) { console.error('[拖动] 移动失败:', err) }
       })
@@ -355,6 +356,7 @@ async function renderRoot(root: string) {
       } else {
         await moveFileSafe(src, dst)
       }
+      try { (window as any).flymdScheduleSync?.() } catch {}
       await api.refresh()
       console.log('[拖动] 移动完成:', src, '→', dst)
     } catch (err) { console.error('[拖动] 移动失败:', err) }

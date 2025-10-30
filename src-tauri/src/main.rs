@@ -371,6 +371,26 @@ async fn s3_list_objects(req: S3ListReq) -> Result<Vec<S3ObjectMeta>, String> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct S3GetReq { conn: S3Conn, key: String, dest_path: String }
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct S3DeleteReq { conn: S3Conn, key: String }
+
+#[tauri::command]
+async fn s3_delete_object(req: S3DeleteReq) -> Result<(), String> {
+  use aws_sdk_s3 as s3;
+  use aws_config::meta::region::RegionProviderChain;
+  use s3::config::Region;
+  let region_str = req.conn.region.clone().unwrap_or_else(|| "us-east-1".to_string());
+  let region = Region::new(region_str.clone());
+  let region_provider = RegionProviderChain::first_try(region.clone());
+  let base_conf = aws_config::defaults(aws_config::BehaviorVersion::latest()).region(region_provider).load().await;
+  let creds = s3::config::Credentials::new(req.conn.access_key_id.clone(), req.conn.secret_access_key.clone(), None, None, "flymd");
+  let mut conf_builder = s3::config::Builder::from(&base_conf).credentials_provider(creds).force_path_style(req.conn.force_path_style);
+  if let Some(ep) = &req.conn.endpoint { if !ep.trim().is_empty() { conf_builder = conf_builder.endpoint_url(ep.trim()); } }
+  let client = s3::Client::from_conf(conf_builder.build());
+  client.delete_object().bucket(&req.conn.bucket).key(&req.key).send().await.map_err(|e| format!("delete error: {e}"))?;
+  Ok(())
+}
 
 #[tauri::command]
 async fn s3_get_object_to_path(req: S3GetReq) -> Result<(), String> {
@@ -423,7 +443,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file, run_installer, s3_list_objects, s3_get_object_to_path])
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file, run_installer, s3_list_objects, s3_get_object_to_path, s3_delete_object])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]

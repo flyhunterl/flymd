@@ -1,4 +1,6 @@
-﻿/*
+﻿         try { await scheduleSync() } catch {}
+        try { await scheduleSync() } catch {}
+/*
   flymd 主入口（中文注释）
   - 极简编辑器：<textarea>
   - Ctrl+E 切换编辑/预览
@@ -2403,7 +2405,9 @@ async function saveFile() {
     await renderRecentPanel(false)
     logInfo('文件保存成功', { path: currentFilePath, size: editor.value.length })
     status.textContent = '文件已保存'
+    
     setTimeout(() => refreshStatus(), 2000)
+    try { await tryAutoSyncAfterSave() } catch {}
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     if (msg.includes('invoke') || msg.includes('Tauri')) {
@@ -2446,7 +2450,8 @@ async function saveAs() {
     await renderRecentPanel(false)
     logInfo('文件另存为成功', { path: target, size: editor.value.length })
     status.textContent = '文件已保存'
-    setTimeout(() => refreshStatus(), 2000)
+    
+    try { await tryAutoSyncAfterSave() } catch {}
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     if (msg.includes('invoke') || msg.includes('Tauri')) {
@@ -2900,6 +2905,20 @@ async function renameFileSafe(p: string, newName: string): Promise<string> {
   await moveFileSafe(p, dst)
   return dst
 }
+async function tryDeleteRemoteByPath(p: string): Promise<void> {
+  try {
+    const cfg = await getSyncConfig()
+    if (!cfg || !cfg.enabled || !cfg.deleteRemoteOnLocalDelete) return
+    const root = await getLibraryRoot(); if (!root) return
+    const rsep = root.includes("\\") ? "\\" : "/"
+    const norm = (x: string) => x.replace(/[\\/]+/g, rsep).toLowerCase()
+    const inside = norm(p).startsWith((norm(root).endsWith(rsep) ? norm(root) : norm(root)+rsep))
+    if (!inside) return
+    const rel = p.slice(root.length).replace(/^[/\\]+/, "")
+    const key = `${(cfg.prefix && cfg.prefix.trim()) ? cfg.prefix.trim() : `vault/${Math.random().toString(36).slice(2)}`}/files/${rel.replace(/\\/g,"/")}`
+    try { await invoke('s3_delete_object', { req: { conn: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey, bucket: cfg.bucket, region: cfg.region, endpoint: cfg.endpoint, forcePathStyle: cfg.forcePathStyle !== false }, key } }) } catch (e) { console.warn('remote delete failed', e) }
+  } catch {}
+}
 // 安全删除：优先直接删除；若为目录或遇到占用异常，尝试递归删除目录内容后再删
 async function deleteFileSafe(p: string, permanent = false): Promise<void> {
   console.log('[deleteFileSafe] 开始删除:', { path: p, permanent })
@@ -2953,8 +2972,10 @@ async function deleteFileSafe(p: string, permanent = false): Promise<void> {
 
       // 最终验证
       const finalCheck = await exists(p)
-      if (!finalCheck) return
-
+      if (!finalCheck) {
+        try { await tryDeleteRemoteByPath(p) } catch {}
+        return
+      }
       throw new Error('文件仍然存在（可能被其他程序占用）')
     } catch (e) {
       lastError = e
@@ -3001,6 +3022,7 @@ async function newFileSafe(dir: string, name = '新建文档.md'): Promise<strin
       })
       row.addEventListener('dragleave', () => { row.classList.remove('selected') })
       row.addEventListener('drop', async (ev) => { try { ev.preventDefault(); row.classList.remove('selected'); const src = ev.dataTransfer?.getData('text/plain') || ''; if (!src) return; const base = e.path; const sep = base.includes('\\\\') ? '\\\\' : '/'; const dst = base + sep + (src.split(/[\\\\/]+/).pop() || ''); if (src === dst) return; const root = await getLibraryRoot(); if (!root || !isInside(root, src) || !isInside(root, dst)) { alert('仅允许在库目录内移动'); return } if (await exists(dst)) { const ok = await ask('目标已存在，是否覆盖？'); if (!ok) return } await moveFileSafe(src, dst); if (currentFilePath === src) { currentFilePath = dst as any; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('移动失败', e) } })
+        try { await scheduleSync() } catch {}
       container.appendChild(kids)
       let expanded = false
       row.addEventListener('click', async () => {
@@ -3136,7 +3158,7 @@ function bindEvents() {
       } catch (e) { showError('移动失败', e) }
     }))
     menu.appendChild(mkItem('重命名', async () => { try { const base = path.replace(/[\\/][^\\/]*$/, ''); const oldFull = path.split(/[\\/]+/).pop() || ''; const m = oldFull.match(/^(.*?)(\.[^.]+)?$/); const oldStem = (m?.[1] || oldFull); const oldExt = (m?.[2] || ''); const newStem = await openRenameDialog(oldStem, oldExt); if (!newStem || newStem === oldStem) return; const name = newStem + oldExt; const dst = base + (base.includes('\\') ? '\\' : '/') + name; if (await exists(dst)) { alert('同名已存在'); return } await moveFileSafe(path, dst); if (currentFilePath === path) { currentFilePath = dst as any; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; try { const nodes = Array.from((document.getElementById('lib-tree')||document.body).querySelectorAll('.lib-node') as any) as HTMLElement[]; const node = nodes.find(n => (n as any).dataset?.path === dst); if (node) node.dispatchEvent(new MouseEvent('click', { bubbles: true })) } catch {} } catch (e) { showError('重命名失败', e) } }))
-    menu.appendChild(mkItem('删除', async () => { try { console.log('[删除] 右键菜单删除, 路径:', path); const ok = await confirmNative('确定删除？将移至回收站'); console.log('[删除] 用户确认结果:', ok); if (!ok) return; console.log('[删除] 开始删除文件'); await deleteFileSafe(path, false); console.log('[删除] 删除完成'); if (currentFilePath === path) { currentFilePath = null as any; if (editor) (editor as HTMLTextAreaElement).value = ''; if (preview) preview.innerHTML = ''; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } } catch (e) { showError('删除失败', e) } }))
+    menu.appendChild(mkItem('删除', async () => { try { console.log('[删除] 右键菜单删除, 路径:', path); const ok = await confirmNative('确定删除？将移至回收站'); console.log('[删除] 用户确认结果:', ok); if (!ok) return; console.log('[删除] 开始删除文件'); await deleteFileSafe(path, false); console.log('[删除] 删除完成'); if (currentFilePath === path) { currentFilePath = null as any; if (editor) (editor as HTMLTextAreaElement).value = ''; if (preview) preview.innerHTML = ''; refreshTitle() } const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }; try { await scheduleSync() } catch {} try { await scheduleSync() } catch {} } catch (e) { showError('删除失败', e) } }))
 
     // 排列方式（名称/修改时间）
     try {
@@ -3582,24 +3604,29 @@ function bindEvents() {
   // 使用 Tauri 原生 ask 更稳定；必要时再降级到 confirm。
   try {
     void getCurrentWindow().onCloseRequested(async (event) => {
+      try {
+        const cfg = await getSyncConfig();
+        if (cfg && cfg.auto && cfg.onExit) {
+          event.preventDefault();
+          try { await saveCurrentDocPosNow() } catch {}
+          if (dirty) {
+            try { const ok = await ask('当前文件未保存，确定退出并开始同步？', { title: '关闭前同步' }); if (!ok) return }
+            catch { const leave = typeof confirm === 'function' ? confirm('当前文件未保存，确定退出并开始同步？') : true; if (!leave) return }
+          }
+          try { await performSync(cfg) } catch (e) { console.warn('exit auto-sync error', e) }
+          try { await getCurrentWindow().destroy() } catch {};
+          return
+        }
+      } catch {}
       if (!dirty) return
-      // 先阻止关闭，再进行异步确认，确保不会直接退出
       event.preventDefault()
-      // 关闭前尝试保存当前阅读/编辑位置
       try { await saveCurrentDocPosNow() } catch {}
       try {
-        // 原生确认对话框（不会导致 Explorer/外壳异常）
-        const ok = await ask('当前文件尚未保存，确认退出吗？', { title: '确认退出' })
-        if (ok) {
-          // 使用 destroy 跳过再次触发 CloseRequested，避免二次询问
-          try { await getCurrentWindow().destroy() } catch { /* 忽略 */ }
-        }
+        const ok = await ask('当前文件未保存，确定退出？', { title: '确认退出' })
+        if (ok) { try { await getCurrentWindow().destroy() } catch {} }
       } catch (e) {
-        // 插件不可用或权限不足时，降级到浏览器 confirm
-        const leave = typeof confirm === 'function' ? confirm('当前文件尚未保存，确认退出吗？') : true
-        if (leave) {
-          try { await getCurrentWindow().destroy() } catch { /* 忽略 */ }
-        }
+        const leave = typeof confirm === 'function' ? confirm('当前文件未保存，确定退出？') : true
+        if (leave) { try { await getCurrentWindow().destroy() } catch {} }
       }
     })
   } catch (e) {
@@ -3776,6 +3803,7 @@ function bindEvents() {
     try { logInfo('打点:事件绑定完成') } catch {}
     // 扩展：初始化目录并激活已启用扩展
     try { await ensurePluginsDir(); await loadAndActivateEnabledPlugins() } catch {}
+    try { await applyAutoSyncSettings('startup') } catch {}
     // 绑定扩展按钮
     try { const btnExt = document.getElementById('btn-extensions'); if (btnExt) btnExt.addEventListener('click', () => { void showExtensionsOverlay(true) }) } catch {}
     // 开启 DevTools 快捷键（生产/开发环境均可）
@@ -4489,7 +4517,11 @@ type SyncConfig = {
   region?: string
   endpoint?: string
   forcePathStyle?: boolean
-  prefix?: string // 远程前缀，例如 vault/<vaultId>
+  prefix?: string // 远端前缀，例如 vault/<vaultId>
+  intervalMin?: number // 自动同步间隔（分钟），可选：1 或 5
+  onStart?: boolean // 启动时同步
+  onExit?: boolean // 关闭前同步
+  deleteRemoteOnLocalDelete?: boolean // 本地删除是否联动删除云端
 }
 
 type LocalMeta = { mtime: number; size: number }
@@ -4515,6 +4547,11 @@ async function getSyncConfig(): Promise<SyncConfig | null> {
       forcePathStyle: o.forcePathStyle !== false,
       prefix: typeof o.prefix === 'string' ? o.prefix : undefined,
     }
+    
+    cfg.intervalMin = Number((o as any).intervalMin || (o as any).interval || 0) || undefined;
+    cfg.onStart = !!(o as any).onStart;
+    cfg.onExit = !!(o as any).onExit;
+    cfg.deleteRemoteOnLocalDelete = !!((o as any).deleteRemoteOnLocalDelete || (o as any).delRemoteOnLocal);
     if (!cfg.enabled) return null
     if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) return null
     return cfg
@@ -4551,6 +4588,14 @@ function ensureSyncOverlayMounted(): HTMLDivElement | null {
           <div class="upl-field">
             <label class="switch"><input id="syn-auto" type="checkbox" /><span class="trk"></span><span class="kn"></span></label>
           </div>
+          <label for="syn-interval">自动间隔</label>
+          <div class="upl-field"><select id="syn-interval"><option value="1">1 分钟</option><option value="5">5 分钟</option></select></div>
+          <label for="syn-onstart">启动时同步</label>
+          <div class="upl-field"><input id="syn-onstart" type="checkbox" /></div>
+          <label for="syn-onexit">关闭前同步</label>
+          <div class="upl-field"><input id="syn-onexit" type="checkbox" /></div>
+          <label for="syn-delremote">本地删除时删除云端</label>
+          <div class="upl-field"><input id="syn-delremote" type="checkbox" /></div>
           <label for="syn-ak">AccessKeyId</label>
           <div class="upl-field"><input id="syn-ak" type="text" placeholder="必填" /></div>
           <label for="syn-sk">SecretAccessKey</label>
@@ -4612,6 +4657,10 @@ async function openSyncDialog() {
   const inputRegion = syn.querySelector('#syn-region') as HTMLInputElement
   const inputPathStyle = syn.querySelector('#syn-pathstyle') as HTMLInputElement
   const inputPrefix = syn.querySelector('#syn-prefix') as HTMLInputElement
+  const inputInterval = syn.querySelector('#syn-interval') as HTMLSelectElement
+  const inputOnStart = syn.querySelector('#syn-onstart') as HTMLInputElement
+  const inputOnExit = syn.querySelector('#syn-onexit') as HTMLInputElement
+  const inputDelRemote = syn.querySelector('#syn-delremote') as HTMLInputElement
   const btnCancel = syn.querySelector('#syn-cancel') as HTMLButtonElement
   const btnClose = syn.querySelector('#syn-close') as HTMLButtonElement
   const btnRun = syn.querySelector('#syn-run') as HTMLButtonElement
@@ -4626,8 +4675,11 @@ async function openSyncDialog() {
     inputBucket.value = raw?.bucket || ''
     inputEndpoint.value = raw?.endpoint || ''
     inputRegion.value = raw?.region || ''
-    inputPathStyle.checked = raw?.forcePathStyle !== false
-    inputPrefix.value = raw?.prefix || ''
+    
+    inputInterval.value = String(Number((raw?.intervalMin || raw?.interval || 0)) || 0)
+    inputOnStart.checked = !!raw?.onStart
+    inputOnExit.checked = !!raw?.onExit
+    inputDelRemote.checked = !!(raw?.deleteRemoteOnLocalDelete || raw?.delRemoteOnLocal)
   } catch {}
 
   showSyncOverlay(true)
@@ -4647,30 +4699,27 @@ async function openSyncDialog() {
         region: inputRegion.value.trim() || undefined,
         forcePathStyle: !!inputPathStyle.checked,
         prefix: (inputPrefix.value.trim() || undefined),
+        intervalMin: (() => { const n = Number(inputInterval.value||'0'); return (n===1||n===5)?n:undefined })(),
+        onStart: !!inputOnStart.checked,
+        onExit: !!inputOnExit.checked,
+        deleteRemoteOnLocalDelete: !!inputDelRemote.checked,
       }
       if (cfg.enabled) {
         if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) { alert('启用同步需要 AccessKeyId/SecretAccessKey/Bucket'); return }
       }
       if (store) { await store.set('sync', cfg); await store.save() }
       showSyncOverlay(false)
-      pluginNotice('同步设置已保存', 'ok', 1200)
+      try { await applyAutoSyncSettings('save') } catch {}
+      try { pluginNotice('同步设置已保存', 'ok', 1200) } catch {}
     } catch (e) { showError('保存同步设置失败', e) }
   }
   form.addEventListener('submit', onSubmit)
   btnCancel.addEventListener('click', onCancel)
   btnClose.addEventListener('click', onCancel)
   syn.addEventListener('click', onOverlay)
-
   btnRun.addEventListener('click', async () => { try { await performSyncInteractive() } catch (e) { showError('同步失败', e) } })
-}
 
-async function performSyncInteractive() {
-  const cfg = await getSyncConfig()
-  if (!cfg) { alert('请先在“同步设置”中启用并填写 S3/R2 参数'); return }
-  synLog('准备中...')
-  await performSync(cfg, (m) => synLog(m))
 }
-
 async function scheduleSync() {
   if (_syncDebounce) return
   _syncDebounce = true
@@ -4794,5 +4843,27 @@ async function tryAutoSyncAfterSave() {
 
 
 
+
+
+
+// 自动同步：定时器与启动应用
+let _autoSyncTimer: any = null
+async function applyAutoSyncSettings(reason: 'startup' | 'save' | 'update' = 'update') {
+  try {
+    const cfg = await getSyncConfig()
+    if (_autoSyncTimer) { try { clearInterval(_autoSyncTimer) } catch {}; _autoSyncTimer = null }
+    if (cfg && cfg.auto) {
+      const min = Number(cfg.intervalMin || 0)
+      if (min && (min === 1 || min === 5)) {
+        _autoSyncTimer = setInterval(async () => {
+          try { await performSync(cfg) } catch (e) { console.warn('auto-sync interval error', e) }
+        }, min * 60 * 1000)
+      }
+      if (reason === 'startup' && cfg.onStart) { try { await performSync(cfg) } catch (e) { console.warn('startup auto-sync error', e) } }
+    }
+  } catch (e) { console.warn('applyAutoSyncSettings error', e) }
+}
+// 提供给文件树模块的全局触发：移动/重命名后触发一次自动同步（受配置约束）
+;(window as any).flymdScheduleSync = async () => { try { const cfg = await getSyncConfig(); if (cfg && cfg.auto) await scheduleSync() } catch {} }
 
 
