@@ -4271,6 +4271,52 @@ actions.appendChild(btnSettings)
     }
   }
   host.appendChild(st2wrap)
+  // 可安装的扩展
+  try {
+    const st3wrap = document.createElement('div'); st3wrap.className = 'ext-section'
+    const st3 = document.createElement('div'); st3.className = 'ext-subtitle'; st3.textContent = '可安装的扩展'
+    st3wrap.appendChild(st3)
+    const list3 = document.createElement('div'); list3.className = 'ext-list'
+    st3wrap.appendChild(list3)
+
+    // 单个可安装扩展：Typecho-publisher
+    const row3 = document.createElement('div'); row3.className = 'ext-item'
+    const meta3 = document.createElement('div'); meta3.className = 'ext-meta'
+    const name3 = document.createElement('div'); name3.className = 'ext-name'
+    // 名称 + 链接（名字后面提供一个超链接）
+    const spanName = document.createElement('span'); spanName.textContent = 'Typecho-publisher '
+    const a = document.createElement('a'); a.href = 'https://github.com/TGU-HansJack/typecho-publisher-flymd'; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'Github'
+    a.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); try { void openInBrowser('https://github.com/TGU-HansJack/typecho-publisher-flymd') } catch {} })
+    name3.appendChild(spanName); const authorSpan = document.createElement('span'); authorSpan.textContent = '作者:HansJack '; name3.appendChild(authorSpan); name3.appendChild(a)
+    const desc3 = document.createElement('div'); desc3.className = 'ext-desc'; desc3.textContent = '将文章发送到typecho站点'
+    meta3.appendChild(name3); meta3.appendChild(desc3)
+
+    const actions3 = document.createElement('div'); actions3.className = 'ext-actions'
+    const btnInstall = document.createElement('button'); btnInstall.className = 'btn primary'; btnInstall.textContent = '安装'
+    try {
+      const installedMap = await getInstalledPlugins()
+      const exists = installedMap['typecho-publisher-flymd']
+      if (exists) { btnInstall.textContent = '已安装'; (btnInstall as HTMLButtonElement).disabled = true }
+    } catch {}
+    btnInstall.addEventListener('click', async () => {
+      try {
+        btnInstall.textContent = '安装中...'; (btnInstall as HTMLButtonElement).disabled = true
+        const rec = await installPluginFromGit('TGU-HansJack/typecho-publisher-flymd@main')
+        await activatePlugin(rec)
+        await refreshExtensionsUI()
+        pluginNotice('安装成功', 'ok', 1500)
+      } catch (e) {
+        try { btnInstall.textContent = '安装' } catch {}
+        try { (btnInstall as HTMLButtonElement).disabled = false } catch {}
+        showError('安装扩展失败', e)
+      }
+    })
+    actions3.appendChild(btnInstall)
+
+    row3.appendChild(meta3); row3.appendChild(actions3)
+    list3.appendChild(row3)
+    host.appendChild(st3wrap)
+  } catch {}
 }
 
 async function removeDirRecursive(dir: string): Promise<void> {
