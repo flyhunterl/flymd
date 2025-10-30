@@ -516,6 +516,7 @@ function scheduleWysiwygRender() {
     if (_wysiwygRaf) cancelAnimationFrame(_wysiwygRaf)
     _wysiwygRaf = requestAnimationFrame(async () => {
       try { await renderPreview() } catch {}
+      try { updateWysiwygVirtualPadding() } catch {}
       syncScrollEditorToPreview()
       try { ensureWysiwygCaretDotInView() } catch {}
       updateWysiwygCaretDot()
@@ -538,6 +539,7 @@ async function setWysiwygEnabled(enable: boolean) {
       try { preview.classList.remove('hidden') } catch {}
       try { if (wysiwygStatusEl) wysiwygStatusEl.classList.add('show') } catch {}
       await renderPreview()
+      try { updateWysiwygVirtualPadding() } catch {}
       syncScrollEditorToPreview()
       updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink()
     } else {
@@ -552,6 +554,7 @@ async function setWysiwygEnabled(enable: boolean) {
       wysiwygHoldInlineDollarUntilEnter = false
       wysiwygHoldFenceUntilEnter = false
       stopDotBlink()
+      try { (editor as any).style.paddingBottom = '40px' } catch {}
     }
     // 更新按钮提示
     try {
@@ -713,6 +716,19 @@ function updateWysiwygCaretDot() {
     wysiwygCaretEl.classList.add('show')
   } catch {}
 }
+
+function updateWysiwygVirtualPadding() {
+  try {
+    const base = 40 // 与 CSS 中 editor 底部 padding 对齐
+    if (!wysiwyg) { try { (editor as any).style.paddingBottom = base + "px" } catch {} ; return }
+    const er = Math.max(0, editor.scrollHeight - editor.clientHeight)
+    const pr = Math.max(0, preview.scrollHeight - preview.clientHeight)
+    const need = Math.max(0, pr - er)
+    const pb = Math.min(100000, Math.round(base + need))
+    try { (editor as any).style.paddingBottom = pb + "px" } catch {}
+  } catch {}
+}
+
 
 // 所见模式：输入 ``` 后自动补一个换行，避免预览代码块遮挡模拟光标
 // WYSIWYG 
@@ -961,6 +977,33 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
           dy *= editor.clientHeight || window.innerHeight || 400
         }
         if (!Number.isFinite(dy) || dy === 0) return
+        const er = Math.max(0, editor.scrollHeight - editor.clientHeight)
+        const pr = Math.max(0, preview.scrollHeight - preview.clientHeight)
+        if (er <= 0 && pr > 0) {
+          try { e.preventDefault() } catch {}
+          const pcur = (preview.scrollTop || 0) >>> 0
+          const pnext = Math.max(0, Math.min(pr, pcur + dy))
+          if (Math.abs(pnext - pcur) < 0.5) return
+          preview.scrollTop = pnext
+          // move caret by lines to reflect scroll when editor has no scroll range
+          let caretAdjusted = false
+          try {
+            if (editor.selectionStart === editor.selectionEnd) {
+              const lineHeightPx = (lineHeight || 16)
+              let linesToMove = 0
+              if (Number.isFinite(lineHeightPx) && lineHeightPx > 0) {
+                linesToMove = Math.round(dy / lineHeightPx)
+              }
+              if (linesToMove === 0) linesToMove = dy > 0 ? 1 : -1
+              const moved = moveWysiwygCaretByLines(linesToMove, _wysiwygCaretVisualColumn)
+              if (moved !== 0) { _wysiwygCaretLineIndex += moved; caretAdjusted = true }
+            }
+          } catch {}
+          try { editor.scrollTop = 0 } catch {}
+          if (caretAdjusted) { try { updateWysiwygLineHighlight(); updateWysiwygCaretDot(); ensureWysiwygCaretDotInView() } catch {} }
+          if (caretAdjusted && !wysiwygEnterToRenderOnly) { try { scheduleWysiwygRender() } catch {} }
+          return
+        }
         const max = Math.max(0, editor.scrollHeight - editor.clientHeight)
         const currentTop = editor.scrollTop || 0
         const next = Math.max(0, Math.min(max, currentTop + dy))
@@ -1634,6 +1677,29 @@ async function renderPreview() {
   try {
     const base = currentFilePath ? currentFilePath.replace(/[\\/][^\\/]*$/, '') : null
     preview.querySelectorAll('img[src]').forEach((img) => {
+      // WYSIWYG: nudge caret after image render when editor has no scroll space
+      try {
+        const el = img as HTMLImageElement
+        const maybeNudge = () => {
+          try { updateWysiwygVirtualPadding() } catch {}
+          try { if (_nudgedCaretForThisRender) return; if (!wysiwyg) return } catch { return }
+          try {
+            const er = Math.max(0, editor.scrollHeight - editor.clientHeight)
+            const pr = Math.max(0, preview.scrollHeight - preview.clientHeight)
+            if (er <= 0 && pr > 0 && editor.selectionStart === editor.selectionEnd) {
+              const st = window.getComputedStyle(editor)
+              const fs = parseFloat(st.fontSize || '14') || 14
+              const v = parseFloat(st.lineHeight || '')
+              const lh = (Number.isFinite(v) && v > 0 ? v : fs * 1.6)
+              const approx = Math.round(((el.clientHeight || 0) / (lh || 16)) * 0.3)
+              const lines = Math.max(4, Math.min(12, approx || 0))
+              const moved = moveWysiwygCaretByLines(lines, _wysiwygCaretVisualColumn)
+              if (moved !== 0) { _nudgedCaretForThisRender = true; updateWysiwygLineHighlight(); updateWysiwygCaretDot(); startDotBlink(); try { ensureWysiwygCaretDotInView() } catch {} }
+            }
+          } catch {}
+        }
+        if (el.complete) { setTimeout(maybeNudge, 0) } else { el.addEventListener('load', () => setTimeout(maybeNudge, 0), { once: true }) }
+      } catch {}
       try {
         const el = img as HTMLImageElement
         const src = el.getAttribute('src') || ''
@@ -2134,8 +2200,8 @@ function checkUpdateSilentOnceAfterStartup() {
 async function toggleMode() {
   mode = mode === 'edit' ? 'preview' : 'edit'
   if (mode === 'preview') {
-    await renderPreview()
-    preview.classList.remove('hidden')
+          try { updateWysiwygVirtualPadding() } catch {}
+      preview.classList.remove('hidden')
   } else {
     if (!wysiwyg) preview.classList.add('hidden')
     editor.focus()
@@ -2401,7 +2467,7 @@ async function newFile() {
   refreshTitle()
   refreshStatus()
   if (mode === 'preview') {
-    await renderPreview()
+          await renderPreview()
   } else if (wysiwyg) {
     scheduleWysiwygRender()
   }
@@ -3297,8 +3363,7 @@ function bindEvents() {
             if (mdText && mdText.trim()) {
               e.preventDefault()
               insertAtCursor(mdText)
-              if (mode === 'preview') await renderPreview()
-              else if (wysiwyg) scheduleWysiwygRender()
+              if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
               return
             }
           }
@@ -3341,8 +3406,7 @@ function bindEvents() {
         if (upCfg) {
           const pub = await uploadImageToS3R2(file, fname, file.type || 'application/octet-stream', upCfg)
           insertAtCursor(`![${fname}](${pub.publicUrl})`)
-          if (mode === 'preview') await renderPreview()
-          else if (wysiwyg) scheduleWysiwygRender()
+          if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
           else if (wysiwyg) scheduleWysiwygRender()
           return
         }
@@ -3392,8 +3456,7 @@ function bindEvents() {
                 }
                 if (partsLocal.length > 0) {
                   insertAtCursor(partsLocal.join('\n'))
-                  if (mode === 'preview') await renderPreview()
-                  else if (wysiwyg) scheduleWysiwygRender()
+                  if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
                   return
                 }
               } else if (isTauriRuntime() && !currentFilePath) {
@@ -3414,8 +3477,7 @@ function bindEvents() {
                   }
                   if (partsLocal.length > 0) {
                     insertAtCursor(partsLocal.join('\n'))
-                    if (mode === 'preview') await renderPreview()
-                    else if (wysiwyg) scheduleWysiwygRender()
+                    if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
                     return
                   }
                 }
@@ -3427,8 +3489,7 @@ function bindEvents() {
               }
               if (partsData.length > 0) {
                 insertAtCursor(partsData.join('\n'))
-                if (mode === 'preview') await renderPreview()
-                else if (wysiwyg) scheduleWysiwygRender()
+                if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
                 return
               }
             }
@@ -3451,8 +3512,7 @@ function bindEvents() {
                 dirty = false
                 refreshTitle()
                 refreshStatus()
-                if (mode === 'preview') await renderPreview()
-                else if (wysiwyg) scheduleWysiwygRender()
+                if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
                 // 拖入 MD 文件后默认预览
                 await switchToPreviewAfterOpen()
               }
@@ -3481,8 +3541,7 @@ function bindEvents() {
             }
             if (partsUpload.length > 0) {
               insertAtCursor(partsUpload.join('\n'))
-              if (mode === 'preview') await renderPreview()
-              else if (wysiwyg) scheduleWysiwygRender()
+              if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
               return
             }
           }
@@ -3498,7 +3557,7 @@ function bindEvents() {
         if (parts.length > 0) {
           insertAtCursor(parts.join('\n'))
           if (mode === 'preview') await renderPreview()
-        }
+          }
         return
       }
       const uriList = dt.getData('text/uri-list') || ''
@@ -3507,8 +3566,7 @@ function bindEvents() {
       if (cand && /^https?:/i.test(cand)) {
         const isImg = extIsImage(cand)
         insertAtCursor(`${isImg ? '!' : ''}[${isImg ? 'image' : 'link'}](${cand})`)
-        if (mode === 'preview') await renderPreview()
-        else if (wysiwyg) scheduleWysiwygRender()
+        if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
       }
     } catch (err) {
       showError('拖拽处理失败', err)
@@ -3627,8 +3685,7 @@ function bindEvents() {
                     }
                     if (partsLocal.length > 0) {
                       insertAtCursor(partsLocal.join('\n'))
-                      if (mode === 'preview') await renderPreview()
-                      else if (wysiwyg) scheduleWysiwygRender()
+                      if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
                       return
                     }
                   }
@@ -3666,8 +3723,7 @@ function bindEvents() {
                     }
                   }
                   insertAtCursor(parts.join('\n'))
-                  if (mode === 'preview') await renderPreview()
-                  else if (wysiwyg) scheduleWysiwygRender()
+                  if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
                   return
                 }
               } catch (e) { console.warn('直连上传失败或未配置，回退为本地路径', e) }
@@ -3679,8 +3735,7 @@ function bindEvents() {
               }
               const text = imgs.map((p) => `![${toLabel(p)}](${toMdUrl(p)})`).join('\n')
               insertAtCursor(text)
-              if (mode === 'preview') await renderPreview()
-              return
+              if (mode === 'preview') await renderPreview(); return
             }
           } catch (err) {
             showError('文件拖拽事件处理失败', err)
@@ -4421,3 +4476,13 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
     }
   } catch {}
 }
+
+
+
+
+
+
+
+
+
+
