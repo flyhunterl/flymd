@@ -188,6 +188,18 @@ let dirty = false // 是否有未保存更改
 
 // 配置存储（使用 tauri store）
 let store: Store | null = null
+// 插件管理（简单实现）
+type PluginManifest = { id: string; name?: string; version?: string; author?: string; description?: string; main?: string }
+type InstalledPlugin = { id: string; name?: string; version?: string; enabled?: boolean; dir: string; main: string; builtin?: boolean; description?: string }
+const PLUGINS_DIR = 'flymd/plugins'
+const builtinPlugins: InstalledPlugin[] = [
+  { id: 'uploader-s3', name: '图床 (S3/R2)', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: '粘贴/拖拽图片自动上传，支持 S3/R2 直连，使用设置中的凭据。' }
+]
+const activePlugins = new Map<string, any>() // id -> module
+const pluginMenuAdded = new Map<string, boolean>() // 限制每个插件仅添加一个菜单项
+let _extOverlayEl: HTMLDivElement | null = null
+let _extListHost: HTMLDivElement | null = null
+let _extInstallInput: HTMLInputElement | null = null
 
 // 文档阅读/编辑位置持久化（最小实现）
 type DocPos = {
@@ -467,6 +479,7 @@ app.innerHTML = `
       <div class="menu-item" id="btn-save" title="保存 (Ctrl+S)">保存</div>
       <div class="menu-item" id="btn-saveas" title="另存为 (Ctrl+Shift+S)">另存为</div>
       <div class="menu-item" id="btn-toggle" title="编辑/预览 (Ctrl+E)">预览</div>
+      <div class="menu-item" id="btn-extensions" title="扩展与插件管理">扩展</div>
     </div>
     <div class="filename" id="filename">未命名</div>
   </div>
@@ -860,6 +873,18 @@ if (menubar) {
   uplBtn.title = '图床设置'
   uplBtn.textContent = '\u56fe\u5e8a'
       menubar.appendChild(uplBtn)
+      // 扩展按钮（如未在首屏模板中渲染，则此处补充）
+      try {
+        const exists = document.getElementById('btn-extensions') as HTMLDivElement | null
+        if (!exists) {
+          const extBtn = document.createElement('div')
+          extBtn.id = 'btn-extensions'
+          extBtn.className = 'menu-item'
+          extBtn.title = '扩展与插件管理'
+          extBtn.textContent = '\u6269\u5c55'
+          menubar.appendChild(extBtn)
+        }
+      } catch {}
       // 所见模式按钮（放在“关于”左侧）
       const wBtn = document.createElement('div')
       wBtn.id = 'btn-wysiwyg'
@@ -3654,6 +3679,18 @@ function bindEvents() {
     refreshStatus()
     bindEvents()  // 🔧 关键：无论存储是否成功，都要绑定事件
     try { logInfo('打点:事件绑定完成') } catch {}
+    // 扩展：初始化目录并激活已启用扩展
+    try { await ensurePluginsDir(); await loadAndActivateEnabledPlugins() } catch {}
+    // 绑定扩展按钮
+    try { const btnExt = document.getElementById('btn-extensions'); if (btnExt) btnExt.addEventListener('click', () => { void showExtensionsOverlay(true) }) } catch {}
+    // 开启 DevTools 快捷键（生产/开发环境均可）
+    try {
+      document.addEventListener('keydown', (e: KeyboardEvent) => {
+        const isF12 = e.key === 'F12'
+        const isCtrlShiftI = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'i'
+        if (isF12 || isCtrlShiftI) { e.preventDefault(); try { getCurrentWebview().openDevtools() } catch {} }
+      })
+    } catch {}
 
     // 兜底：主动询问后端是否有“默认程序/打开方式”传入的待打开路径
     try {
@@ -3945,3 +3982,355 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
   return Promise.resolve()
 }
 // ========= END =========
+
+// ========== 扩展/插件：运行时与 UI ==========
+async function ensurePluginsDir(): Promise<void> {
+  try { await mkdir(PLUGINS_DIR as any, { baseDir: BaseDirectory.AppLocalData, recursive: true } as any) } catch {}
+}
+
+async function getHttpClient(): Promise<{ fetch?: any; Body?: any; ResponseType?: any; available?: () => Promise<boolean> } | null> {
+  try {
+    const mod: any = await import('@tauri-apps/plugin-http')
+    const http = {
+      fetch: mod?.fetch,
+      Body: mod?.Body,
+      ResponseType: mod?.ResponseType,
+      // 标记可用：存在 fetch 即视为可用，避免因网络失败误报不可用
+      available: async () => true,
+    }
+    if (typeof http.fetch === 'function') return http
+    return null
+  } catch { return null }
+}
+
+function pluginNotice(msg: string, level: 'ok' | 'err' = 'ok', ms = 1600) {
+  try {
+    const el = document.getElementById('status')
+    if (el) {
+      el.textContent = (level === 'ok' ? '✔ ' : '✖ ') + msg
+      setTimeout(() => { try { el.textContent = '' } catch {} }, ms)
+    }
+  } catch {}
+}
+
+async function getInstalledPlugins(): Promise<Record<string, InstalledPlugin>> {
+  try {
+    if (!store) return {}
+    const p = await store.get('plugins')
+    const obj = (p && typeof p === 'object') ? (p as any) : {}
+    const map = obj?.installed && typeof obj.installed === 'object' ? obj.installed : {}
+    return map as Record<string, InstalledPlugin>
+  } catch { return {} }
+}
+
+async function setInstalledPlugins(map: Record<string, InstalledPlugin>): Promise<void> {
+  try {
+    if (!store) return
+    const old = (await store.get('plugins')) as any || {}
+    old.installed = map
+    await store.set('plugins', old)
+    await store.save()
+  } catch {}
+}
+
+function parseRepoInput(inputRaw: string): { type: 'github' | 'http'; manifestUrl: string; mainUrl?: string } | null {
+  const input = (inputRaw || '').trim()
+  if (!input) return null
+  if (/^https?:\/\//i.test(input)) {
+    let u = input
+    if (!/manifest\.json$/i.test(u)) {
+      if (!u.endsWith('/')) u += '/'
+      u += 'manifest.json'
+    }
+    return { type: 'http', manifestUrl: u }
+  }
+  const m = input.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:@([A-Za-z0-9_.\/-]+))?$/)
+  if (m) {
+    const user = m[1], repo = m[2], branch = m[3] || 'main'
+    const base = `https://raw.githubusercontent.com/${user}/${repo}/${branch}/`
+    return { type: 'github', manifestUrl: base + 'manifest.json' }
+  }
+  return null
+}
+
+async function fetchTextSmart(url: string): Promise<string> {
+  try {
+    const http = await getHttpClient()
+    if (http && http.fetch) {
+      const resp = await http.fetch(url, { method: 'GET', responseType: http.ResponseType?.Text })
+      if (resp && (resp.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300))) {
+        const text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
+        return String(text || '')
+      }
+    }
+  } catch {}
+  const r2 = await fetch(url)
+  if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
+  return await r2.text()
+}
+
+async function installPluginFromGit(inputRaw: string): Promise<InstalledPlugin> {
+  await ensurePluginsDir()
+  const parsed = parseRepoInput(inputRaw)
+  if (!parsed) throw new Error('无法识别的输入，请输入 URL 或 username/repo[@branch]')
+  const manifestText = await fetchTextSmart(parsed.manifestUrl)
+  let manifest: PluginManifest
+  try { manifest = JSON.parse(manifestText) as PluginManifest } catch { throw new Error('manifest.json 解析失败') }
+  if (!manifest?.id) throw new Error('manifest.json 缺少 id')
+  const mainRel = (manifest.main || 'main.js').replace(/^\/+/, '')
+  const mainUrl = parsed.manifestUrl.replace(/manifest\.json$/i, '') + mainRel
+  const mainCode = await fetchTextSmart(mainUrl)
+  // 保存文件
+  const dir = `${PLUGINS_DIR}/${manifest.id}`
+  await mkdir(dir as any, { baseDir: BaseDirectory.AppLocalData, recursive: true } as any)
+  await writeTextFile(`${dir}/manifest.json` as any, JSON.stringify(manifest, null, 2), { baseDir: BaseDirectory.AppLocalData } as any)
+  await writeTextFile(`${dir}/${mainRel}` as any, mainCode, { baseDir: BaseDirectory.AppLocalData } as any)
+  const record: InstalledPlugin = { id: manifest.id, name: manifest.name, version: manifest.version, enabled: true, dir, main: mainRel, description: manifest.description }
+  const map = await getInstalledPlugins()
+  map[manifest.id] = record
+  await setInstalledPlugins(map)
+  return record
+}
+
+async function readPluginMainCode(p: InstalledPlugin): Promise<string> {
+  const path = `${p.dir}/${p.main || 'main.js'}`
+  return await readTextFile(path as any, { baseDir: BaseDirectory.AppLocalData } as any)
+}
+
+async function activatePlugin(p: InstalledPlugin): Promise<void> {
+  if (activePlugins.has(p.id)) return
+  const code = await readPluginMainCode(p)
+  const dataUrl = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(code)
+  const mod: any = await import(/* @vite-ignore */ dataUrl)
+  const http = await getHttpClient()
+  const ctx = {
+    http,
+    invoke,
+    storage: {
+      get: async (key: string) => {
+        try { if (!store) return null; const all = (await store.get('plugin:' + p.id)) as any || {}; return all[key] } catch { return null }
+      },
+      set: async (key: string, value: any) => { try { if (!store) return; const all = (await store.get('plugin:' + p.id)) as any || {}; all[key] = value; await store.set('plugin:' + p.id, all); await store.save() } catch {} }
+    },
+    addMenuItem: (opt: { label: string; title?: string; onClick?: () => void }) => {
+      try {
+        const bar = document.querySelector('.menubar') as HTMLDivElement | null
+        if (!bar) return () => {}
+        if (pluginMenuAdded.get(p.id)) return () => {}
+        pluginMenuAdded.set(p.id, true)
+        const el = document.createElement('div')
+        el.className = 'menu-item'
+        el.textContent = (p.id === 'typecho-publisher-flymd') ? '发布' : (opt.label || '扩展')
+        if (opt.title) el.title = opt.title
+        el.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); try { opt.onClick && opt.onClick() } catch (e) { console.error(e) } })
+        bar.appendChild(el)
+        return () => { try { el.remove() } catch {} }
+      } catch { return () => {} }
+    },
+    ui: {
+      notice: (msg: string, level?: 'ok' | 'err', ms?: number) => pluginNotice(msg, level, ms),
+      confirm: async (message: string) => { try { return await confirmNative(message, '确认') } catch { return false } }
+    },
+    getEditorValue: () => editor.value,
+    setEditorValue: (v: string) => { try { editor.value = v; dirty = true; refreshTitle(); refreshStatus(); if (mode === 'preview') { void renderPreview() } else if (wysiwyg) { scheduleWysiwygRender() } } catch {} },
+  }
+  if (typeof mod?.activate === 'function') {
+    await mod.activate(ctx)
+  }
+  activePlugins.set(p.id, mod)
+}
+
+async function deactivatePlugin(id: string): Promise<void> {
+  const mod = activePlugins.get(id)
+  if (!mod) return
+  try { if (typeof mod?.deactivate === 'function') await mod.deactivate() } catch {}
+  activePlugins.delete(id)
+  try { pluginMenuAdded.delete(id) } catch {}
+}
+
+async function refreshExtensionsUI(): Promise<void> {
+  if (!_extListHost) return
+  const host = _extListHost
+  host.innerHTML = ''
+  // Builtins
+  const builtinsEl = document.createElement('div')
+  builtinsEl.className = 'ext-section'
+  const st1 = document.createElement('div'); st1.className = 'ext-subtitle'; st1.textContent = '内置扩展'
+  builtinsEl.appendChild(st1)
+  const list1 = document.createElement('div'); list1.className = 'ext-list'
+  builtinsEl.appendChild(list1)
+  for (const b of builtinPlugins) {
+    const row = document.createElement('div'); row.className = 'ext-item'
+    const meta = document.createElement('div'); meta.className = 'ext-meta'
+    const name = document.createElement('div'); name.className = 'ext-name'; name.textContent = `${b.name} (${b.version})`
+    const desc = document.createElement('div'); desc.className = 'ext-desc'; desc.textContent = b.description || ''
+    meta.appendChild(name); meta.appendChild(desc)
+    const actions = document.createElement('div'); actions.className = 'ext-actions'
+    const btnEnable = document.createElement('button'); btnEnable.className = 'btn'
+    const upCfg = await getUploaderConfig().catch(() => null)
+    const enabled = !!upCfg
+    btnEnable.textContent = enabled ? '已开启' : '开启'
+    btnEnable.addEventListener('click', async () => {
+      try {
+        const cur = await getUploaderConfig().catch(() => null)
+        const next = cur ? null : { enabled: true, accessKeyId: '', secretAccessKey: '', bucket: '', region: 'auto', endpoint: '', forcePathStyle: true, aclPublicRead: true, keyTemplate: '{year}/{month}{fileName}{md5}.{extName}' } as any
+        if (store) {
+          if (next) { await store.set('uploader', next) } else { await store.set('uploader', null) }
+          await store.save()
+        }
+        await refreshExtensionsUI()
+        pluginNotice('已更新图床开关', 'ok', 1200)
+      } catch (e) { showError('更新图床开关失败', e) }
+    })
+    const btnSettings = document.createElement('button'); btnSettings.className = 'btn primary'; btnSettings.textContent = '设置'
+    // 打开内置图床设置对话框
+    btnSettings.addEventListener('click', () => { try { void openUploaderDialog() } catch {} })
+    actions.appendChild(btnEnable); actions.appendChild(btnSettings)
+    row.appendChild(meta); row.appendChild(actions)
+    list1.appendChild(row)
+  }
+  host.appendChild(builtinsEl)
+
+  // Installed
+  const st2wrap = document.createElement('div'); st2wrap.className = 'ext-section'
+  const st2 = document.createElement('div'); st2.className = 'ext-subtitle'; st2.textContent = '已安装扩展'
+  st2wrap.appendChild(st2)
+  const list2 = document.createElement('div'); list2.className = 'ext-list'
+  st2wrap.appendChild(list2)
+  const map = await getInstalledPlugins()
+  const arr = Object.values(map)
+  if (arr.length === 0) {
+    const empty = document.createElement('div'); empty.className = 'ext-empty'; empty.textContent = '暂无安装的扩展'
+    st2wrap.appendChild(empty)
+  } else {
+  for (const p of arr) {
+      const row = document.createElement('div'); row.className = 'ext-item'
+      const meta = document.createElement('div'); meta.className = 'ext-meta'
+      const name = document.createElement('div'); name.className = 'ext-name'; name.textContent = `${p.name || p.id} ${p.version ? '(' + p.version + ')' : ''}`
+      const desc = document.createElement('div'); desc.className = 'ext-desc'; desc.textContent = p.description || p.dir
+      meta.appendChild(name); meta.appendChild(desc)
+      const actions = document.createElement('div'); actions.className = 'ext-actions'
+      if (p.enabled) {
+        const btnSet = document.createElement('button'); btnSet.className = 'btn'; btnSet.textContent = '设置'
+        btnSet.addEventListener('click', async () => {
+          try {
+            const mod = activePlugins.get(p.id)
+            const http = await getHttpClient()
+            const ctx = {
+              http,
+              invoke,
+              storage: {
+                get: async (key: string) => { try { if (!store) return null; const all = (await store.get('plugin:' + p.id)) as any || {}; return all[key] } catch { return null } },
+                set: async (key: string, value: any) => { try { if (!store) return; const all = (await store.get('plugin:' + p.id)) as any || {}; all[key] = value; await store.set('plugin:' + p.id, all); await store.save() } catch {} }
+              },
+              ui: { notice: (msg: string, level?: 'ok' | 'err', ms?: number) => pluginNotice(msg, level, ms), confirm: async (m: string) => { try { return await confirmNative(m) } catch { return false } } },
+              getEditorValue: () => editor.value,
+              setEditorValue: (v: string) => { try { editor.value = v; dirty = true; refreshTitle(); refreshStatus(); if (mode === 'preview') { void renderPreview() } else if (wysiwyg) { scheduleWysiwygRender() } } catch {} },
+            }
+            if (mod && typeof mod.openSettings === 'function') { await mod.openSettings(ctx) }
+            else pluginNotice('该扩展未提供设置', 'err', 1600)
+          } catch (e) { showError('打开扩展设置失败', e) }
+        })
+        actions.appendChild(btnSet)
+      }
+      const btnToggle = document.createElement('button'); btnToggle.className = 'btn'; btnToggle.textContent = p.enabled ? '禁用' : '启用'
+      btnToggle.addEventListener('click', async () => {
+        try { p.enabled = !p.enabled; map[p.id] = p; await setInstalledPlugins(map); if (p.enabled) await activatePlugin(p); else await deactivatePlugin(p.id); await refreshExtensionsUI() } catch (e) { showError('切换扩展失败', e) }
+      })
+      const btnRemove = document.createElement('button'); btnRemove.className = 'btn warn'; btnRemove.textContent = '移除'
+      btnRemove.addEventListener('click', async () => {
+        const ok = await confirmNative(`确定移除扩展 ${p.name || p.id} ？`)
+        if (!ok) return
+        try {
+          await deactivatePlugin(p.id)
+          await removeDirRecursive(p.dir)
+          delete map[p.id]; await setInstalledPlugins(map)
+          await refreshExtensionsUI(); pluginNotice('已移除扩展', 'ok', 1200)
+        } catch (e) { showError('移除扩展失败', e) }
+      })
+      actions.appendChild(btnToggle)
+      actions.appendChild(btnRemove)
+      row.appendChild(meta); row.appendChild(actions)
+      list2.appendChild(row)
+    }
+  }
+  host.appendChild(st2wrap)
+}
+
+async function removeDirRecursive(dir: string): Promise<void> {
+  try {
+    const entries = await readDir(dir as any, { baseDir: BaseDirectory.AppLocalData } as any)
+    for (const e of entries as any[]) {
+      if (e.isDir) { await removeDirRecursive(`${dir}/${e.name}`) }
+      else { try { await remove(`${dir}/${e.name}` as any, { baseDir: BaseDirectory.AppLocalData } as any) } catch {} }
+    }
+    try { await remove(dir as any, { baseDir: BaseDirectory.AppLocalData } as any) } catch {}
+  } catch {}
+}
+
+function ensureExtensionsOverlayMounted() {
+  if (_extOverlayEl) return
+  const overlay = document.createElement('div')
+  overlay.className = 'ext-overlay'
+  overlay.id = 'extensions-overlay'
+  overlay.innerHTML = `
+    <div class=\"ext-dialog\" role=\"dialog\" aria-modal=\"true\">
+      <div class=\"ext-header\">
+        <div>扩展与插件管理</div>
+        <button class=\"ext-close\" id=\"ext-close\">×</button>
+      </div>
+      <div class=\"ext-body\">
+        <div class=\"ext-section\">
+          <div class=\"ext-subtitle\">安装扩展（GitHub 或 URL）</div>
+          <div class=\"ext-install\">
+            <input type=\"text\" id=\"ext-install-input\" placeholder=\"输入 URL 或 username/repository@branch（branch 可省略）\">
+            <button class=\"primary\" id=\"ext-install-btn\">安装</button>
+          </div>
+        </div>
+        <div class=\"ext-section\" id=\"ext-list-host\"></div>
+      </div>
+    </div>
+  `
+  document.body.appendChild(overlay)
+  _extOverlayEl = overlay
+  _extListHost = overlay.querySelector('#ext-list-host') as HTMLDivElement | null
+  _extInstallInput = overlay.querySelector('#ext-install-input') as HTMLInputElement | null
+  const btnClose = overlay.querySelector('#ext-close') as HTMLButtonElement | null
+  const btnInstall = overlay.querySelector('#ext-install-btn') as HTMLButtonElement | null
+  btnClose?.addEventListener('click', () => showExtensionsOverlay(false))
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) showExtensionsOverlay(false) })
+  btnInstall?.addEventListener('click', async () => {
+    const v = (_extInstallInput?.value || '').trim()
+    if (!v) return
+    try {
+      const rec = await installPluginFromGit(v)
+      await activatePlugin(rec)
+      _extInstallInput!.value = ''
+      await refreshExtensionsUI()
+      pluginNotice('安装成功', 'ok', 1500)
+    } catch (e) {
+      showError('安装扩展失败', e)
+    }
+  })
+}
+
+async function showExtensionsOverlay(show: boolean): Promise<void> {
+  ensureExtensionsOverlayMounted()
+  if (!_extOverlayEl) return
+  if (show) {
+    _extOverlayEl.classList.add('show')
+    await refreshExtensionsUI()
+  } else {
+    _extOverlayEl.classList.remove('show')
+  }
+}
+
+async function loadAndActivateEnabledPlugins(): Promise<void> {
+  try {
+    const map = await getInstalledPlugins()
+    const toEnable = Object.values(map).filter((p) => p.enabled)
+    for (const p of toEnable) {
+      try { await activatePlugin(p) } catch (e) { console.warn('插件激活失败', p.id, e) }
+    }
+  } catch {}
+}
