@@ -1,4 +1,4 @@
-﻿/*
+/*
   flymd 主入口（中文注释）
   - 极简编辑器：<textarea>
   - Ctrl+E 切换编辑/预览
@@ -4184,8 +4184,10 @@ async function refreshExtensionsUI(): Promise<void> {
     })
     const btnSettings = document.createElement('button'); btnSettings.className = 'btn primary'; btnSettings.textContent = '设置'
     // 打开内置图床设置对话框
-    btnSettings.addEventListener('click', () => { try { void openUploaderDialog() } catch {} })
-    actions.appendChild(btnEnable); actions.appendChild(btnSettings)
+    btnSettings.addEventListener('click', () => { try { void showExtensionsOverlay(false); void openUploaderDialog() } catch {} })
+    // 隐藏图床扩展开启按钮（扩展弹窗内不展示）
+try { (btnEnable as any).style.display = 'none' } catch {}
+actions.appendChild(btnSettings)
     row.appendChild(meta); row.appendChild(actions)
     list1.appendChild(row)
   }
