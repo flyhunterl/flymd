@@ -4195,7 +4195,7 @@ async function getMarketUrl(): Promise<string | null> {
   try { if (store) { const u = await store.get('pluginMarket:url'); if (typeof u === 'string' && /^https?:\/\//i.test(u)) return u } } catch {}
   try { const u = (import.meta as any)?.env?.FLYMD_PLUGIN_MARKET_URL; if (typeof u === 'string' && /^https?:\/\//i.test(u)) return u } catch {}
   // 默认索引（占位，仓库可替换为实际地址）
-  return 'https://raw.githubusercontent.com/flyhunterl/flymd-plugin-index/main/index.json'
+  return 'https://raw.githubusercontent.com/flyhunterl/flymd/main/index.json'
 }
 
 // 加载“可安装的扩展”索引（带缓存与回退）
@@ -4558,6 +4558,7 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
     }
   } catch {}
 }
+
 
 
 

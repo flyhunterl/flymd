@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "updatedAt": "2025-10-31T13:14:39Z",
+  "ttlSeconds": 3600,
+  "items": [
+    {
+      "homepage": "https://github.com/TGU-HansJack/typecho-publisher-flymd",
+      "name": "Typecho Publisher",
+      "description": "发布到 Typecho",
+      "author": "HansJack",
+      "id": "typecho-publisher-flymd",
+      "install": {
+        "ref": "TGU-HansJack/typecho-publisher-flymd@http",
+        "type": "github"
+      }
+    },
+    {
+      "homepage": "https://github.com/flyhunterl/flymd",
+      "name": "字数统计",
+      "description": "显示当前文档的字符数",
+      "author": "flyMD",
+      "id": "wordcount",
+      "install": {
+        "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/wordcount/manifest.json",
+        "type": "manifest"
+      }
+    }
+  ]
+}
