@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "flymd",
-  "version": "0.1.0-fix",
+  "version": "0.1.1",
   "identifier": "com.flymd",
   "build": {
     "beforeDevCommand": "vite",
@@ -192,7 +192,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "飞速MarkDown v0.1.0-fix",
+        "title": "飞速MarkDown v0.1.1",
         "width": 960,
         "height": 640,
         "resizable": true,

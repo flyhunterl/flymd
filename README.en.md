@@ -2,14 +2,14 @@
 
 [简体中文](README.md) | English
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-fix-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.1.1-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
 A fast, lightweight, and stable Markdown editor/previewer powered by Tauri.
 
 
-- Extensions & Plugins: manage built-ins and install community extensions (v0.1.0-fix).
+- Extensions & Plugins: manage built-ins and install community extensions (v0.1.1).
 - WYSIWYG overlay: instant rendering while typing; toggle with `Ctrl+Shift+E`.
 - Solid Preview mode: toggle Edit/Preview with `Ctrl+E`.
 - Full Markdown stack: markdown-it, KaTeX (LaTeX), Mermaid, highlight.js.
