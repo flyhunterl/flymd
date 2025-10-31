@@ -43,6 +43,13 @@ async function getSyncMetadata(): Promise<SyncMetadata> {
     }
     const data = await readFile(metaPath as any)
     const text = new TextDecoder().decode(data)
+
+    // 检查文件是否为空或内容无效
+    if (!text || text.trim().length === 0) {
+      console.warn('同步元数据文件为空，将使用默认值')
+      return { files: {}, lastSyncTime: 0 }
+    }
+
     const rawMeta = JSON.parse(text) as any
 
     // 兼容旧格式：确保所有文件条目都有 size 字段
@@ -60,6 +67,21 @@ async function getSyncMetadata(): Promise<SyncMetadata> {
     return { files, lastSyncTime: rawMeta.lastSyncTime || 0 }
   } catch (e) {
     console.warn('读取同步元数据失败', e)
+    // 如果是 JSON 解析错误，尝试备份损坏的文件
+    if (e instanceof SyntaxError) {
+      console.warn('元数据文件损坏，将使用空元数据重新开始同步')
+      try {
+        const localDataDir = await appLocalDataDir()
+        const metaPath = localDataDir + (localDataDir.includes('\\') ? '\\' : '/') + 'flymd-sync-meta.json'
+        const backupPath = metaPath + '.corrupted.' + Date.now()
+        // 尝试备份损坏的文件
+        try {
+          const data = await readFile(metaPath as any)
+          await writeFile(backupPath as any, data as any)
+          console.log('已备份损坏的元数据文件到: ' + backupPath)
+        } catch {}
+      } catch {}
+    }
     return { files: {}, lastSyncTime: 0 }
   }
 }
@@ -240,6 +262,7 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
 async function listRemoteDir(baseUrl: string, auth: { username: string; password: string }, remotePath: string): Promise<{ files: { name: string; isDir: boolean; mtime?: number }[] }> {
   const http = await getHttpClient(); if (!http) throw new Error('no http client')
   const url = joinUrl(baseUrl, remotePath)
+  await syncLog('[remote-propfind] 请求: ' + url)
   const body = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/><d:resourcetype/></d:prop></d:propfind>`
   const headers: Record<string,string> = { Depth: '1', 'Content-Type': 'application/xml' }
   const authStr = btoa(`${auth.username}:${auth.password}`)
@@ -250,33 +273,77 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
     // plugin-http: ok true; browser: resp.ok
     if (resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)) {
       text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
+      await syncLog('[remote-propfind] 响应成功，状态: ' + (resp?.status || 'ok'))
     } else {
+      await syncLog('[remote-propfind] 响应失败，状态: ' + (resp?.status || 'unknown'))
       throw new Error('HTTP ' + (resp?.status || ''))
     }
   } catch (e) {
+    await syncLog('[remote-propfind] 第一次请求失败，尝试备用Content-Type: ' + (e?.message || e))
     // 回退：部分服务可能需要 application/xml + charset
     const resp = await http.fetch(url, { method: 'PROPFIND', headers: { ...headers, 'Content-Type': 'text/xml; charset=utf-8' }, body })
     if (resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)) {
       text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
-    } else { throw e }
+      await syncLog('[remote-propfind] 备用请求成功')
+    } else {
+      await syncLog('[remote-propfind] 备用请求也失败')
+      throw e
+    }
   }
   const files: { name: string; isDir: boolean; mtime?: number }[] = []
   try {
     const doc = new DOMParser().parseFromString(String(text || ''), 'application/xml')
     const respNodes = Array.from(doc.getElementsByTagNameNS('*','response'))
+    await syncLog('[remote-propfind] 解析到 ' + respNodes.length + ' 个response节点')
     for (const r of respNodes) {
       const hrefEl = (r as any).getElementsByTagNameNS?.('*','href')?.[0] as Element | undefined
       const mEl = (r as any).getElementsByTagNameNS?.('*','getlastmodified')?.[0] as Element | undefined
       const typeEl = (r as any).getElementsByTagNameNS?.('*','resourcetype')?.[0] as Element | undefined
-      let href = hrefEl?.textContent || ''
-      if (!href) continue
-      try { href = decodeURIComponent(href) } catch {}
-      // 跳过自身目录项
-      const baseHref = joinUrl(baseUrl, remotePath) + (joinUrl(baseUrl, remotePath).endsWith('/') ? '' : '/')
-      if (href.replace(/\\/g,'/').replace(/\/+$/,'/') === baseHref.replace(/\\/g,'/').replace(/\/+$/,'/')) continue
+      const rawHref = hrefEl?.textContent || ''
+      if (!rawHref) continue
+
+      let href = rawHref
+      try { href = decodeURIComponent(rawHref) } catch {}
+
+      // 跳过自身目录项 - 改进：比较路径部分
+      const normalizeUrl = (u: string) => u.replace(/\\/g,'/').replace(/\/+$/,'').toLowerCase()
+
+      // 获取当前请求URL的路径部分
+      let requestPath = ''
+      try {
+        const requestUrl = new URL(joinUrl(baseUrl, remotePath))
+        requestPath = normalizeUrl(decodeURIComponent(requestUrl.pathname))
+      } catch {
+        // 如果不是完整URL，直接使用 remotePath
+        requestPath = normalizeUrl(remotePath)
+      }
+
+      // 获取 item 的路径部分
+      let itemPath = ''
+      if (href.startsWith('http')) {
+        // 完整URL
+        try {
+          itemPath = normalizeUrl(new URL(href).pathname)
+        } catch {
+          itemPath = normalizeUrl(href)
+        }
+      } else {
+        // 相对路径或绝对路径
+        itemPath = normalizeUrl(href)
+      }
+
+      await syncLog('[remote-propfind-debug] requestPath=' + requestPath + ' itemPath=' + itemPath)
+
+      if (itemPath === requestPath) {
+        await syncLog('[remote-propfind] 跳过当前目录本身: ' + href)
+        continue
+      }
+
       // 取最后一段作为 name
       const segs = href.replace(/\/+$/,'').split('/')
       const name = segs.pop() || ''
+      if (!name) continue
+
       // 改进目录判断：多种方式判断
       // 1. 检查 resourcetype 是否包含 collection
       // 2. 检查 href 是否以 / 结尾（很多WebDAV服务器用这个表示目录）
@@ -284,30 +351,45 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
       const isDir = /<d:collection\b/i.test(typeXml) ||
                     /<collection\b/i.test(typeXml) ||
                     /\bcollection\b/i.test(typeXml) ||
-                    (hrefEl?.textContent || '').endsWith('/')
+                    rawHref.endsWith('/')
       const mt = mEl?.textContent ? toEpochMs(mEl.textContent) : undefined
+      await syncLog('[remote-propfind] 项目: ' + name + ' isDir=' + isDir + ' href=' + rawHref.substring(0, 50))
       files.push({ name, isDir, mtime: mt })
     }
-  } catch {}
+  } catch (e) {
+    await syncLog('[remote-propfind] 解析XML失败: ' + (e?.message || e))
+  }
   return { files }
 }
 
 async function listRemoteRecursively(baseUrl: string, auth: { username: string; password: string }, rootPath: string): Promise<Map<string, FileEntry>> {
   const map = new Map<string, FileEntry>()
+  await syncLog('[remote-scan] 开始扫描远程目录: ' + rootPath)
   async function walk(rel: string) {
     const full = rel ? rootPath.replace(/\/+$/,'') + '/' + rel.replace(/^\/+/, '') : rootPath
-let __filesRes: any = { files: [] }; try { __filesRes = await listRemoteDir(baseUrl, auth, full) } catch { __filesRes = { files: [] } }
-const files = __filesRes.files || []
+    await syncLog('[remote-scan] 正在列出目录: ' + full)
+    let __filesRes: any = { files: [] }
+    try {
+      __filesRes = await listRemoteDir(baseUrl, auth, full)
+      await syncLog('[remote-scan] 目录 ' + full + ' 包含 ' + (__filesRes.files?.length || 0) + ' 个项目')
+    } catch (e) {
+      await syncLog('[remote-scan-error] 列出目录失败: ' + full + ' - ' + (e?.message || e))
+      __filesRes = { files: [] }
+    }
+    const files = __filesRes.files || []
     for (const f of files) {
       const r = rel ? rel + '/' + f.name : f.name
       if (f.isDir) {
+        await syncLog('[remote-scan] 发现目录: ' + r + ', 递归进入')
         await walk(r)
       } else {
-        map.set(r, { path: r, mtime: toEpochMs(f.mtime) })
+        await syncLog('[remote-scan] 发现文件: ' + r + ', mtime=' + f.mtime)
+        map.set(r, { path: r, mtime: toEpochMs(f.mtime), size: 0 })
       }
     }
   }
   await walk('')
+  await syncLog('[remote-scan] 完成，共找到 ' + map.size + ' 个远程文件')
   return map
 }
 
@@ -345,11 +427,38 @@ async function deleteRemoteFile(baseUrl: string, auth: { username: string; passw
   if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
 }
 
+// 同步锁：防止并发同步
+let _syncInProgress = false
+
 export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; downloaded: number; skipped?: boolean } | null> {
   try {
+    // 检查是否已有同步在进行
+    if (_syncInProgress) {
+      const msg = '同步已在进行中，跳过本次请求 (reason=' + reason + ')'
+      await syncLog('[skip] ' + msg)
+      console.log('[WebDAV Sync]', msg)
+      try { const el = document.getElementById('status'); if (el) el.textContent = '同步进行中，请稍候'; setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 1500) } catch {}
+      return { uploaded: 0, downloaded: 0, skipped: true }
+    }
+
+    // 设置同步锁
+    _syncInProgress = true
+    await syncLog('[sync-start] 开始同步 (reason=' + reason + ')')
+    console.log('[WebDAV Sync] 开始同步, reason:', reason)
+
     const cfg = await getWebdavSyncConfig()
-    if (!cfg.enabled) return { uploaded: 0, downloaded: 0, skipped: true }
-    const localRoot = await getLibraryRoot(); if (!localRoot) { try { const el = document.getElementById('status'); if (el) el.textContent = '未选择库目录，已跳过同步'; setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 1800) } catch {}; return { uploaded: 0, downloaded: 0, skipped: true } }
+    if (!cfg.enabled) {
+      await syncLog('[skip] 同步未启用')
+      console.log('[WebDAV Sync] 同步未启用')
+      return { uploaded: 0, downloaded: 0, skipped: true }
+    }
+    const localRoot = await getLibraryRoot()
+    if (!localRoot) {
+      await syncLog('[skip] 未选择库目录')
+      console.log('[WebDAV Sync] 未选择库目录')
+      try { const el = document.getElementById('status'); if (el) el.textContent = '未选择库目录，已跳过同步'; setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 1800) } catch {}
+      return { uploaded: 0, downloaded: 0, skipped: true }
+    }
     try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… 准备中' } catch {}
     const auth = { username: cfg.username, password: cfg.password }; await syncLog('[prep] root=' + (await getLibraryRoot()) + ' remoteRoot=' + cfg.rootPath)
     try { await ensureRemoteDir(cfg.baseUrl, auth, (cfg.rootPath || '').replace(/\/+$/, '')) } catch {}
@@ -387,11 +496,11 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       // 情况2：本地无，远程有
       else if (!local && remote) {
         if (last) {
-          // 上次同步过，现在本地没有了 → 可能是本地被删除，但也可能是扫描遗漏等问题
-          // 为了安全起见，不自动删除远程文件，而是记录警告
-          await syncLog('[warn] ' + k + ' 本地未找到，但为了安全不删除远程文件（可能是误判）')
-          // 不再执行删除操作
-          // plan.push({ type: 'delete', rel: k, reason: 'local-deleted' })
+          // 上次同步过，现在本地没有了
+          // 可能情况：1) 本地文件被误删 2) 用户主动删除
+          // 安全策略：不删除远程，而是重新下载到本地（恢复文件）
+          await syncLog('[detect] ' + k + ' 本地文件缺失，将从远程下载恢复')
+          plan.push({ type: 'download', rel: k, reason: 'local-missing' })
         } else {
           // 上次没同步过 → 远程新增，下载
           plan.push({ type: 'download', rel: k, reason: 'remote-new' })
@@ -572,17 +681,29 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     console.warn('sync failed', e)
     try { const el = document.getElementById('status'); if (el) el.textContent = '同步失败：' + (e?.message || '未知错误'); setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 3000) } catch {}
     return null
+  } finally {
+    // 释放同步锁
+    _syncInProgress = false
+    await syncLog('[sync-end] 同步结束')
   }
 }
 
 export async function initWebdavSync(): Promise<void> {
   try {
     const cfg = await getWebdavSyncConfig()
-    // F5 快捷键
+    // F5 快捷键 - 改进：防止浏览器默认刷新行为
     try {
       document.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'F5') { e.preventDefault(); void syncNow('manual') }
-      })
+        if (e.key === 'F5') {
+          e.preventDefault()
+          e.stopPropagation()
+          e.stopImmediatePropagation()
+          // 延迟执行，避免事件冲突
+          setTimeout(() => {
+            void syncNow('manual')
+          }, 100)
+        }
+      }, { capture: true })  // 使用捕获阶段，优先拦截
     } catch {}
     // 启动后触发一次
     if (cfg.enabled && cfg.onStartup) { setTimeout(() => { void syncNow('startup') }, 600) }
