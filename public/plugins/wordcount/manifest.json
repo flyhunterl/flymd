@@ -1,0 +1,9 @@
+{
+  "id": "wordcount",
+  "name": "字数统计",
+  "version": "0.1.0",
+  "author": "flyMD",
+  "description": "显示当前文档的字符数",
+  "homepage": "https://github.com/flyhunterl/flymd",
+  "main": "main.js"
+}

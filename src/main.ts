@@ -203,6 +203,28 @@ let _extOverlayEl: HTMLDivElement | null = null
 let _extListHost: HTMLDivElement | null = null
 let _extInstallInput: HTMLInputElement | null = null
 
+// 可安装扩展索引项（最小影响：仅用于渲染“可安装的扩展”区块）
+type InstallableItem = {
+  id: string
+  name: string
+  description?: string
+  author?: string
+  homepage?: string
+  install: { type: 'github' | 'manifest'; ref: string }
+}
+
+// 兜底列表：保留现有硬编码单条，作为无网/源失败时的默认项
+const FALLBACK_INSTALLABLES: InstallableItem[] = [
+  {
+    id: 'typecho-publisher-flymd',
+    name: 'Typecho Publisher',
+    description: '发布到 Typecho',
+    author: 'HansJack',
+    homepage: 'https://github.com/TGU-HansJack/typecho-publisher-flymd',
+    install: { type: 'github', ref: 'TGU-HansJack/typecho-publisher-flymd@http' }
+  }
+]
+
 // 文档阅读/编辑位置持久化（最小实现）
 type DocPos = {
   pos: number
@@ -4167,6 +4189,57 @@ async function fetchTextSmart(url: string): Promise<string> {
   return await r2.text()
 }
 
+
+// 插件市场：获取索引地址（优先级：Store > 环境变量 > 默认）
+async function getMarketUrl(): Promise<string | null> {
+  try { if (store) { const u = await store.get('pluginMarket:url'); if (typeof u === 'string' && /^https?:\/\//i.test(u)) return u } } catch {}
+  try { const u = (import.meta as any)?.env?.FLYMD_PLUGIN_MARKET_URL; if (typeof u === 'string' && /^https?:\/\//i.test(u)) return u } catch {}
+  // 默认索引（占位，仓库可替换为实际地址）
+  return 'https://raw.githubusercontent.com/flyhunterl/flymd-plugin-index/main/index.json'
+}
+
+// 加载“可安装的扩展”索引（带缓存与回退）
+async function loadInstallablePlugins(force = false): Promise<InstallableItem[]> {
+  // 1) 缓存（Store）
+  try {
+    if (!force && store) {
+      const c = (await store.get('pluginMarket:cache')) as any
+      const now = Date.now()
+      if (c && Array.isArray(c.items) && typeof c.ts === 'number' && typeof c.ttl === 'number') {
+        if (now - c.ts < c.ttl) return c.items as InstallableItem[]
+      }
+    }
+  } catch {}
+
+  // 2) 远程索引
+  try {
+    const url = await getMarketUrl()
+    if (url) {
+      const text = await fetchTextSmart(url)
+      const json = JSON.parse(text)
+      const ttl = Math.max(10_000, Math.min(24 * 3600_000, (json.ttlSeconds ?? 3600) * 1000))
+      const items = (json.items ?? [])
+        .filter((x: any) => x && typeof x.id === 'string' && x.install && (x.install.type === 'github' || x.install.type === 'manifest') && typeof x.install.ref === 'string')
+        .slice(0, 100)
+      if (store) { await store.set('pluginMarket:cache', { ts: Date.now(), ttl, items }); await store.save() }
+      if (items.length > 0) return items as InstallableItem[]
+    }
+  } catch {}
+
+  // 3) 本地内置文件（如存在）
+  try {
+    const resp = await fetch('plugin-market.json')
+    if (resp && resp.ok) {
+      const text = await resp.text()
+      const json = JSON.parse(text)
+      const items = Array.isArray(json?.items) ? json.items : []
+      if (items.length > 0) return items as InstallableItem[]
+    }
+  } catch {}
+
+  // 4) 兜底
+  return FALLBACK_INSTALLABLES
+}
 async function installPluginFromGit(inputRaw: string): Promise<InstalledPlugin> {
   await ensurePluginsDir()
   const parsed = parseRepoInput(inputRaw)
@@ -4357,48 +4430,54 @@ async function refreshExtensionsUI(): Promise<void> {
   // 可安装的扩展
   try {
     const st3wrap = document.createElement('div'); st3wrap.className = 'ext-section'
-    const st3 = document.createElement('div'); st3.className = 'ext-subtitle'; st3.textContent = '可安装的扩展'
-    st3wrap.appendChild(st3)
-    const list3 = document.createElement('div'); list3.className = 'ext-list'
-    st3wrap.appendChild(list3)
-
-    // 单个可安装扩展：Typecho-publisher
-    const row3 = document.createElement('div'); row3.className = 'ext-item'
-    const meta3 = document.createElement('div'); meta3.className = 'ext-meta'
-    const name3 = document.createElement('div'); name3.className = 'ext-name'
-    // 名称 + 链接（名字后面提供一个超链接）
-    const spanName = document.createElement('span'); spanName.textContent = 'Typecho-publisher '
-    const a = document.createElement('a'); a.href = 'https://github.com/TGU-HansJack/typecho-publisher-flymd'; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'Github'
-    a.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); try { void openInBrowser('https://github.com/TGU-HansJack/typecho-publisher-flymd') } catch {} })
-    name3.appendChild(spanName); const authorSpan = document.createElement('span'); authorSpan.textContent = '作者:HansJack '; name3.appendChild(authorSpan); name3.appendChild(a)
-    const desc3 = document.createElement('div'); desc3.className = 'ext-desc'; desc3.textContent = '将文章发送到typecho站点'
-    meta3.appendChild(name3); meta3.appendChild(desc3)
-
-    const actions3 = document.createElement('div'); actions3.className = 'ext-actions'
-    const btnInstall = document.createElement('button'); btnInstall.className = 'btn primary'; btnInstall.textContent = '安装'
+const hd = document.createElement('div'); hd.className = 'ext-subtitle'; hd.textContent = '可安装的扩展'
+const btnRefresh = document.createElement('button'); btnRefresh.className = 'btn'; btnRefresh.textContent = '刷新'
+btnRefresh.style.marginLeft = '8px'
+btnRefresh.addEventListener('click', async () => { try { (btnRefresh as HTMLButtonElement).disabled = true; await loadInstallablePlugins(true); await refreshExtensionsUI() } finally { (btnRefresh as HTMLButtonElement).disabled = false } })
+hd.appendChild(btnRefresh)
+st3wrap.appendChild(hd)
+const list3 = document.createElement('div'); list3.className = 'ext-list'
+st3wrap.appendChild(list3)
+const items = await loadInstallablePlugins(false)
+for (const it of items) {
+  const row = document.createElement('div'); row.className = 'ext-item'
+  const meta = document.createElement('div'); meta.className = 'ext-meta'
+  const name = document.createElement('div'); name.className = 'ext-name'
+  const spanName = document.createElement('span'); spanName.textContent = String(it.name || it.id)
+  name.appendChild(spanName)
+  if (it.author) { const a2 = document.createElement('span'); a2.textContent = '作者:' + (it.author || '') + ' '; name.appendChild(a2) }
+  if (it.homepage) {
+    const a = document.createElement('a'); a.href = it.homepage!; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = '主页'
+    a.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); try { void openInBrowser(it.homepage!) } catch {} })
+    name.appendChild(a)
+  }
+  const desc = document.createElement('div'); desc.className = 'ext-desc'; desc.textContent = it.description || ''
+  meta.appendChild(name); meta.appendChild(desc)
+  const actions = document.createElement('div'); actions.className = 'ext-actions'
+  const btnInstall = document.createElement('button'); btnInstall.className = 'btn primary'; btnInstall.textContent = '安装'
+  try {
+    const installedMap = await getInstalledPlugins()
+    const exists = installedMap[it.id]
+    if (exists) { btnInstall.textContent = '已安装'; (btnInstall as HTMLButtonElement).disabled = true }
+  } catch {}
+  btnInstall.addEventListener('click', async () => {
     try {
-      const installedMap = await getInstalledPlugins()
-      const exists = installedMap['typecho-publisher-flymd']
-      if (exists) { btnInstall.textContent = '已安装'; (btnInstall as HTMLButtonElement).disabled = true }
-    } catch {}
-    btnInstall.addEventListener('click', async () => {
-      try {
-        btnInstall.textContent = '安装中...'; (btnInstall as HTMLButtonElement).disabled = true
-        const rec = await installPluginFromGit('TGU-HansJack/typecho-publisher-flymd@http')
-        await activatePlugin(rec)
-        await refreshExtensionsUI()
-        pluginNotice('安装成功', 'ok', 1500)
-      } catch (e) {
-        try { btnInstall.textContent = '安装' } catch {}
-        try { (btnInstall as HTMLButtonElement).disabled = false } catch {}
-        showError('安装扩展失败', e)
-      }
-    })
-    actions3.appendChild(btnInstall)
-
-    row3.appendChild(meta3); row3.appendChild(actions3)
-    list3.appendChild(row3)
-    host.appendChild(st3wrap)
+      btnInstall.textContent = '安装中...'; (btnInstall as HTMLButtonElement).disabled = true
+      const rec = await installPluginFromGit(it.install.ref)
+      await activatePlugin(rec)
+      await refreshExtensionsUI()
+      pluginNotice('安装成功', 'ok', 1500)
+    } catch (e) {
+      try { btnInstall.textContent = '安装' } catch {}
+      try { (btnInstall as HTMLButtonElement).disabled = false } catch {}
+      showError('安装扩展失败', e)
+    }
+  })
+  actions.appendChild(btnInstall)
+  row.appendChild(meta); row.appendChild(actions)
+  list3.appendChild(row)
+}
+host.appendChild(st3wrap)
   } catch {}
 }
 
@@ -4479,6 +4558,12 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
     }
   } catch {}
 }
+
+
+
+
+
+
 
 
 
