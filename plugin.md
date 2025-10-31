@@ -615,6 +615,12 @@ export function activate(context) {
 }
 ```
 
+## 提交扩展到应用内市场
+
+将扩展地址及说明发送到fly@llingfei.com或issue
+
+
+
 ## 常见问题
 
 ### Q: 如何调试插件？
