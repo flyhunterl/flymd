@@ -128,7 +128,14 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
       const full = dir + (dir.includes('\\') ? '\\' : '/') + name
       const relp = rel ? rel + '/' + name : name
       try {
-        if (e.isDir) {
+        // 正确判断是否为目录
+        let isDir = !!(e as any)?.isDirectory
+        if ((e as any)?.isDirectory === undefined) {
+          try { const st = await stat(full) as any; isDir = !!st?.isDirectory } catch { isDir = false }
+        }
+
+        if (isDir) {
+          await syncLog('[scan-dir] ' + (rel ? rel + '/' : '') + name)
           await walk(full, relp)
         } else {
           const meta = await stat(full)
