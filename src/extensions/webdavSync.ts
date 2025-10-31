@@ -575,7 +575,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
           <div id="sync-title">WebDAV 同步设置</div>
           <button id="sync-close" class="about-close" title="关闭">×</button>
         </div>
-        <div class="upl-desc">自动同步库文件到 WebDAV 服务器。</div>
+        <div class="upl-desc">自动同步库文件到 WebDAV 服务器。首次上传需要计算哈希值，耗时较长。</div>
         <form class="upl-body" id="sync-form">
           <div class="upl-grid">
             <div class="upl-section-title">基础配置</div>

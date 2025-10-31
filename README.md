@@ -121,6 +121,18 @@
 | `Ctrl+I` | 斜体 |
 | `Ctrl+K` | 插入链接 |
 
+## 🔌 扩展开发
+
+flyMD 支持通过扩展插件来增强功能。你可以：
+
+- 开发自定义扩展插件
+- 从 GitHub 或 HTTP URL 安装插件
+- 管理已安装的扩展
+
+详细开发指南请参阅：[扩展开发文档](plugin.md)
+
+**示例插件：**
+- [Typecho Publisher](https://github.com/TGU-HansJack/typecho-publisher-flymd) - 将文章发布到 Typecho 博客平台
 
 
 ## 📊 性能指标（目标）
