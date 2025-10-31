@@ -5,7 +5,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.1.0-fix-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -104,7 +104,7 @@
 ### 安装使用（推荐）
 
 1. 前往 [Releases](https://github.com/flyhunterl/flymd/releases) 下载最新版本
-2. 运行 `flymd_0.1.0_x64_setup.exe` 安装（文件名以实际发布为准）
+2. 运行 `flymd_0.1.0-fix_x64_setup.exe` 安装（文件名以实际发布为准）
 3. 启动 flyMD，开始使用
 
 ## ⌨️ 快捷键
@@ -144,8 +144,14 @@ flyMD 支持通过扩展插件来增强功能。你可以：
 
 ## 🗺️ 路线图
 
+## 更新 v0.1.0-fix
+- 暂时去掉同步功能中的删除判断，只做增量同步
+- 大幅优化同步功能的哈希算法
+- 增加同步日志显示和日志记录
+> 使用0.1.0版本同步导致本地文件丢失的，可以使用该版本同步恢复
+
 ## 更新 v0.1.0
-- 新增：webdav同步扩展 使用同步元数据管理，采用内容哈希对比，时间戳辅助判断。**别使用这个版本，会导致本地文件丢失**
+- 新增：webdav同步扩展 使用同步元数据管理，采用内容哈希对比，时间戳辅助判断。**该发布已经删除，这个版本会导致本地文件丢失**
 > 同步功能正在测试调整阶段，务必做好数据备份。如有问题请提ISSUE。 首次同步会比较慢（计算哈希值）
 
 
@@ -267,5 +273,6 @@ flyMD 支持通过扩展插件来增强功能。你可以：
 
 
 <img width="300" height="300" alt="image" src="https://github.com/user-attachments/assets/4a716fd5-dc61-4a4f-b968-91626debe8d2" />
+
 
 
