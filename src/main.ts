@@ -4264,14 +4264,20 @@ async function refreshExtensionsUI(): Promise<void> {
   meta.appendChild(name); meta.appendChild(desc)
   const actions = document.createElement('div'); actions.className = 'ext-actions'
   if (b.id === 'uploader-s3') {
+    try {
+      const upCfg = await (async () => { try { if (store) return (await store.get('uploader')) as any } catch { return null } })()
+      const tag = document.createElement('span'); tag.className = 'ext-tag'; tag.textContent = upCfg?.enabled ? '✓ 已启用' : '未启用'
+      tag.style.opacity = '0.75'; tag.style.marginRight = '8px'; tag.style.color = upCfg?.enabled ? '#22c55e' : '#94a3b8'
+      actions.appendChild(tag)
+    } catch {}
     const btn = document.createElement('button'); btn.className = 'btn primary'; btn.textContent = '设置'
     btn.addEventListener('click', () => { try { void showExtensionsOverlay(false); void openUploaderDialog() } catch {} })
     actions.appendChild(btn)
   } else if (b.id === 'webdav-sync') {
     try {
       const cfg = await getWebdavSyncConfig()
-      const tag = document.createElement('span'); tag.className = 'ext-tag'; tag.textContent = cfg.enabled ? '已开启' : '已关闭'
-      ;(tag as any).style.opacity = '0.75'; (tag as any).style.marginRight = '8px'
+      const tag = document.createElement('span'); tag.className = 'ext-tag'; tag.textContent = cfg.enabled ? '✓ 已启用' : '未启用'
+      tag.style.opacity = '0.75'; tag.style.marginRight = '8px'; tag.style.color = cfg.enabled ? '#22c55e' : '#94a3b8'
       actions.appendChild(tag)
     } catch {}
     const btn2 = document.createElement('button'); btn2.className = 'btn primary'; btn2.textContent = '设置'

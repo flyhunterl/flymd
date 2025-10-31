@@ -347,41 +347,86 @@ export async function initWebdavSync(): Promise<void> {
 }
 
 export async function openWebdavSyncDialog(): Promise<void> {
-  // 简单设置面板（覆盖写入 store 中的 sync 配置）
   const overlayId = 'sync-overlay'
   let overlay = document.getElementById(overlayId) as HTMLDivElement | null
   if (!overlay) {
     overlay = document.createElement('div')
     overlay.id = overlayId
-    overlay.style.position = 'fixed'; overlay.style.left = '0'; overlay.style.top = '0'; overlay.style.right = '0'; overlay.style.bottom = '0'
-    overlay.style.background = 'rgba(0,0,0,0.35)'; overlay.style.zIndex = '9999'; overlay.style.display = 'none'
-    const panel = document.createElement('div')
-    panel.style.width = '560px'; panel.style.maxWidth = '90vw'; panel.style.margin = '10vh auto'; panel.style.background = '#fff'; panel.style.borderRadius = '8px'; panel.style.padding = '16px'; panel.style.boxShadow = '0 6px 24px rgba(0,0,0,0.2)'
-    panel.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div style="font-size:16px;font-weight:600">WebDAV 同步设置</div>
-        <button id="sync-close" title="关闭" style="font-size:18px;line-height:18px;border:none;background:transparent;cursor:pointer">×</button>
-      </div>
-      <div style="display:grid;grid-template-columns:120px 1fr;gap:8px 12px;align-items:center;">
-        <label>启用同步</label><input id="sync-enabled" type="checkbox"/>
-        <label>启动时同步</label><input id="sync-onstartup" type="checkbox"/>
-        <label>关闭前同步</label><input id="sync-onshutdown" type="checkbox"/>
-        <label>超时(毫秒)</label><input id="sync-timeout" type="number" min="1000" step="1000" placeholder="120000"/>
-        <label>Base URL</label><input id="sync-baseurl" type="text" placeholder="https://dav.example.com/remote.php/dav/files/user"/>
-        <label>Root Path</label><input id="sync-root" type="text" placeholder="/flymd"/>
-        <label>用户名</label><input id="sync-user" type="text"/>
-        <label>密码</label><input id="sync-pass" type="password"/>
-      </div>
-      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-        <button id="sync-openlog" class="btn">打开日志</button>
-        <button id="sync-test" class="btn">立即同步(F5)</button>
-        <button id="sync-save" class="btn primary">保存</button>
+    overlay.className = 'upl-overlay hidden'
+    overlay.innerHTML = `
+      <div class="upl-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-title">
+        <div class="upl-header">
+          <div id="sync-title">WebDAV 同步设置</div>
+          <button id="sync-close" class="about-close" title="关闭">×</button>
+        </div>
+        <div class="upl-desc">自动同步库文件到 WebDAV 服务器。</div>
+        <form class="upl-body" id="sync-form">
+          <div class="upl-grid">
+            <div class="upl-section-title">基础配置</div>
+            <label for="sync-enabled">启用同步</label>
+            <div class="upl-field">
+              <label class="switch">
+                <input id="sync-enabled" type="checkbox"/>
+                <span class="trk"></span><span class="kn"></span>
+              </label>
+            </div>
+            <label for="sync-onstartup">启动时同步</label>
+            <div class="upl-field">
+              <label class="switch">
+                <input id="sync-onstartup" type="checkbox"/>
+                <span class="trk"></span><span class="kn"></span>
+              </label>
+            </div>
+            <label for="sync-onshutdown">关闭前同步</label>
+            <div class="upl-field">
+              <label class="switch">
+                <input id="sync-onshutdown" type="checkbox"/>
+                <span class="trk"></span><span class="kn"></span>
+              </label>
+            </div>
+            <label for="sync-timeout">超时(毫秒)</label>
+            <div class="upl-field">
+              <input id="sync-timeout" type="number" min="1000" step="1000" placeholder="120000"/>
+              <div class="upl-hint">建议 120000（2分钟），网络较慢时可适当增加</div>
+            </div>
+
+            <div class="upl-section-title">WebDAV 服务器</div>
+            <label for="sync-baseurl">Base URL</label>
+            <div class="upl-field">
+              <input id="sync-baseurl" type="url" placeholder="https://dav.example.com/remote.php/dav/files/user"/>
+              <div class="upl-hint">
+                推荐：<a href="https://infini-cloud.net/en/" target="_blank" style="color:#0066cc;text-decoration:none">infini</a>（使用推介码 <strong>HBG6T</strong> 额外获得 20+5G 空间）<br>
+                
+              </div>
+            </div>
+            <label for="sync-root">Root Path</label>
+            <div class="upl-field">
+              <input id="sync-root" type="text" placeholder="/flymd"/>
+              <div class="upl-hint">文件将同步到此路径下</div>
+            </div>
+            <label for="sync-user">用户名</label>
+            <div class="upl-field"><input id="sync-user" type="text" placeholder="必填"/></div>
+            <label for="sync-pass">密码</label>
+            <div class="upl-field"><input id="sync-pass" type="password" placeholder="必填"/></div>
+          </div>
+          <div class="upl-actions">
+            <button type="button" id="sync-openlog" class="btn-secondary">打开日志</button>
+            <button type="button" id="sync-test" class="btn-secondary">立即同步(F5)</button>
+            <button type="submit" id="sync-save" class="btn-primary">保存</button>
+          </div>
+        </form>
       </div>
     `
-    overlay.appendChild(panel)
     document.body.appendChild(overlay)
   }
-  const show = (v: boolean) => { overlay!.style.display = v ? 'block' : 'none' }
+
+  const show = (v: boolean) => {
+    if (!overlay) return
+    if (v) overlay.classList.remove('hidden')
+    else overlay.classList.add('hidden')
+  }
+
+  const form = overlay.querySelector('#sync-form') as HTMLFormElement
   const btnClose = overlay.querySelector('#sync-close') as HTMLButtonElement
   const btnSave = overlay.querySelector('#sync-save') as HTMLButtonElement
   const btnTest = overlay.querySelector('#sync-test') as HTMLButtonElement
@@ -405,7 +450,8 @@ export async function openWebdavSyncDialog(): Promise<void> {
   elUser.value = cfg.username || ''
   elPass.value = cfg.password || ''
 
-  btnSave.onclick = async () => {
+  const onSubmit = async (e: Event) => {
+    e.preventDefault()
     try {
       await setWebdavSyncConfig({
         enabled: elEnabled.checked,
@@ -420,12 +466,20 @@ export async function openWebdavSyncDialog(): Promise<void> {
       // 反馈
       try { const el = document.getElementById('status'); if (el) { el.textContent = '已保存 WebDAV 同步配置'; setTimeout(() => { try { el.textContent = '' } catch {} }, 1200) } } catch {}
       show(false)
-    } catch (e) { alert('保存失败: ' + e) }
+    } catch (e) {
+      alert('保存失败: ' + (e?.message || e))
+    }
   }
+
+  const onCancel = () => show(false)
+  const onOverlayClick = (e: MouseEvent) => { if (e.target === overlay) onCancel() }
+
+  form.addEventListener('submit', onSubmit)
   btnTest.onclick = () => { void syncNow('manual') }
   btnOpenLog.onclick = () => { void openSyncLog() }
-  btnClose.onclick = () => show(false)
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) show(false) })
+  btnClose.onclick = onCancel
+  overlay.addEventListener('click', onOverlayClick)
+
   show(true)
 }
 // 远端目录保障：逐级 MKCOL 创建目录（已存在则忽略）
