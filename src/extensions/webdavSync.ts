@@ -7,6 +7,26 @@ import { readDir, stat, readFile, writeFile, mkdir, exists, open as openFileHand
 import { appLocalDataDir } from '@tauri-apps/api/path'
 import { openPath } from '@tauri-apps/plugin-opener'
 
+// 更新状态栏显示
+function updateStatus(msg: string) {
+  try {
+    const el = document.getElementById('status')
+    if (el) el.textContent = msg
+  } catch {}
+}
+
+// 清空状态栏
+function clearStatus(delayMs: number = 1800) {
+  try {
+    const el = document.getElementById('status')
+    if (el) {
+      setTimeout(() => {
+        try { if (el) el.textContent = '' } catch {}
+      }, delayMs)
+    }
+  } catch {}
+}
+
 // 计算文件内容的 MD5 哈希
 async function calculateFileHash(data: Uint8Array): Promise<string> {
   try {
@@ -210,6 +230,8 @@ type FileEntry = { path: string; mtime: number; size: number; hash?: string; isD
 
 async function scanLocal(root: string, lastMeta?: SyncMetadata): Promise<Map<string, FileEntry>> {
   const map = new Map<string, FileEntry>()
+  let fileCount = 0
+
   async function walk(dir: string, rel: string) {
     let ents: any[] = []
     try { ents = await readDir(dir, { recursive: false } as any) as any[] } catch { ents = [] }
@@ -227,27 +249,29 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
         }
 
         if (isDir) {
-          await syncLog('[scan-dir] ' + (rel ? rel + '/' : '') + name)
           await walk(full, relp)
         } else {
           const meta = await stat(full)
           const mt = toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs)
           const size = Number((meta as any)?.size || 0)
           const __relUnix = relp.replace(/\\\\/g, '/')
-          if (!/\.(md|markdown|txt|png|jpg|jpeg|gif|svg|pdf)$/i.test(__relUnix)) { await syncLog('[scan-skip-ext] ' + __relUnix); continue }
+          if (!/\.(md|markdown|txt|png|jpg|jpeg|gif|svg|pdf)$/i.test(__relUnix)) continue
+
+          fileCount++
+          if (fileCount % 10 === 0) {
+            updateStatus(`扫描本地… ${fileCount} 个文件`)
+          }
 
           // 优化：检查是否可以复用上次的哈希
           const lastFile = lastMeta?.files[__relUnix]
           let hash = ''
           if (lastFile && lastFile.mtime === mt && lastFile.size === size) {
-            // 文件没有变化，复用上次的哈希
+            // 文件没有变化，复用上次的哈希（不重新计算）
             hash = lastFile.hash
-            await syncLog('[scan-ok] ' + __relUnix + ' hash=' + hash.substring(0, 8) + ' (cached)')
           } else {
-            // 文件有变化，重新计算哈希
+            // 文件有变化或第一次扫描，需要计算哈希
             const fileData = await readFile(full as any)
             hash = await calculateFileHash(fileData as Uint8Array)
-            await syncLog('[scan-ok] ' + __relUnix + ' hash=' + hash.substring(0, 8) + ' (calculated)')
           }
 
           map.set(__relUnix, { path: __relUnix, mtime: mt, size, hash })
@@ -256,13 +280,13 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
     }
   }
   await walk(root, '')
+  updateStatus(`本地扫描完成，共 ${fileCount} 个文件`)
   return map
 }
 
 async function listRemoteDir(baseUrl: string, auth: { username: string; password: string }, remotePath: string): Promise<{ files: { name: string; isDir: boolean; mtime?: number }[] }> {
   const http = await getHttpClient(); if (!http) throw new Error('no http client')
   const url = joinUrl(baseUrl, remotePath)
-  await syncLog('[remote-propfind] 请求: ' + url)
   const body = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/><d:resourcetype/></d:prop></d:propfind>`
   const headers: Record<string,string> = { Depth: '1', 'Content-Type': 'application/xml' }
   const authStr = btoa(`${auth.username}:${auth.password}`)
@@ -270,31 +294,22 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
   let text = ''
   try {
     const resp = await http.fetch(url, { method: 'PROPFIND', headers, body })
-    // plugin-http: ok true; browser: resp.ok
     if (resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)) {
       text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
-      await syncLog('[remote-propfind] 响应成功，状态: ' + (resp?.status || 'ok'))
     } else {
-      await syncLog('[remote-propfind] 响应失败，状态: ' + (resp?.status || 'unknown'))
       throw new Error('HTTP ' + (resp?.status || ''))
     }
   } catch (e) {
-    await syncLog('[remote-propfind] 第一次请求失败，尝试备用Content-Type: ' + (e?.message || e))
     // 回退：部分服务可能需要 application/xml + charset
     const resp = await http.fetch(url, { method: 'PROPFIND', headers: { ...headers, 'Content-Type': 'text/xml; charset=utf-8' }, body })
     if (resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)) {
       text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
-      await syncLog('[remote-propfind] 备用请求成功')
-    } else {
-      await syncLog('[remote-propfind] 备用请求也失败')
-      throw e
-    }
+    } else { throw e }
   }
   const files: { name: string; isDir: boolean; mtime?: number }[] = []
   try {
     const doc = new DOMParser().parseFromString(String(text || ''), 'application/xml')
     const respNodes = Array.from(doc.getElementsByTagNameNS('*','response'))
-    await syncLog('[remote-propfind] 解析到 ' + respNodes.length + ' 个response节点')
     for (const r of respNodes) {
       const hrefEl = (r as any).getElementsByTagNameNS?.('*','href')?.[0] as Element | undefined
       const mEl = (r as any).getElementsByTagNameNS?.('*','getlastmodified')?.[0] as Element | undefined
@@ -314,46 +329,35 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
         const requestUrl = new URL(joinUrl(baseUrl, remotePath))
         requestPath = normalizeUrl(decodeURIComponent(requestUrl.pathname))
       } catch {
-        // 如果不是完整URL，直接使用 remotePath
         requestPath = normalizeUrl(remotePath)
       }
 
       // 获取 item 的路径部分
       let itemPath = ''
       if (href.startsWith('http')) {
-        // 完整URL
         try {
           itemPath = normalizeUrl(new URL(href).pathname)
         } catch {
           itemPath = normalizeUrl(href)
         }
       } else {
-        // 相对路径或绝对路径
         itemPath = normalizeUrl(href)
       }
 
-      await syncLog('[remote-propfind-debug] requestPath=' + requestPath + ' itemPath=' + itemPath)
-
-      if (itemPath === requestPath) {
-        await syncLog('[remote-propfind] 跳过当前目录本身: ' + href)
-        continue
-      }
+      if (itemPath === requestPath) continue
 
       // 取最后一段作为 name
       const segs = href.replace(/\/+$/,'').split('/')
       const name = segs.pop() || ''
       if (!name) continue
 
-      // 改进目录判断：多种方式判断
-      // 1. 检查 resourcetype 是否包含 collection
-      // 2. 检查 href 是否以 / 结尾（很多WebDAV服务器用这个表示目录）
+      // 改进目录判断
       const typeXml = typeEl?.outerHTML || typeEl?.innerHTML || ''
       const isDir = /<d:collection\b/i.test(typeXml) ||
                     /<collection\b/i.test(typeXml) ||
                     /\bcollection\b/i.test(typeXml) ||
                     rawHref.endsWith('/')
       const mt = mEl?.textContent ? toEpochMs(mEl.textContent) : undefined
-      await syncLog('[remote-propfind] 项目: ' + name + ' isDir=' + isDir + ' href=' + rawHref.substring(0, 50))
       files.push({ name, isDir, mtime: mt })
     }
   } catch (e) {
@@ -364,14 +368,19 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
 
 async function listRemoteRecursively(baseUrl: string, auth: { username: string; password: string }, rootPath: string): Promise<Map<string, FileEntry>> {
   const map = new Map<string, FileEntry>()
-  await syncLog('[remote-scan] 开始扫描远程目录: ' + rootPath)
+  let dirCount = 0
+
   async function walk(rel: string) {
     const full = rel ? rootPath.replace(/\/+$/,'') + '/' + rel.replace(/^\/+/, '') : rootPath
-    await syncLog('[remote-scan] 正在列出目录: ' + full)
+
+    dirCount++
+    if (dirCount % 5 === 0) {
+      updateStatus(`扫描远程… ${dirCount} 个目录`)
+    }
+
     let __filesRes: any = { files: [] }
     try {
       __filesRes = await listRemoteDir(baseUrl, auth, full)
-      await syncLog('[remote-scan] 目录 ' + full + ' 包含 ' + (__filesRes.files?.length || 0) + ' 个项目')
     } catch (e) {
       await syncLog('[remote-scan-error] 列出目录失败: ' + full + ' - ' + (e?.message || e))
       __filesRes = { files: [] }
@@ -380,16 +389,14 @@ async function listRemoteRecursively(baseUrl: string, auth: { username: string; 
     for (const f of files) {
       const r = rel ? rel + '/' + f.name : f.name
       if (f.isDir) {
-        await syncLog('[remote-scan] 发现目录: ' + r + ', 递归进入')
         await walk(r)
       } else {
-        await syncLog('[remote-scan] 发现文件: ' + r + ', mtime=' + f.mtime)
         map.set(r, { path: r, mtime: toEpochMs(f.mtime), size: 0 })
       }
     }
   }
   await walk('')
-  await syncLog('[remote-scan] 完成，共找到 ' + map.size + ' 个远程文件')
+  updateStatus(`远程扫描完成，共 ${map.size} 个文件`)
   return map
 }
 
@@ -456,10 +463,11 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     if (!localRoot) {
       await syncLog('[skip] 未选择库目录')
       console.log('[WebDAV Sync] 未选择库目录')
-      try { const el = document.getElementById('status'); if (el) el.textContent = '未选择库目录，已跳过同步'; setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 1800) } catch {}
+      updateStatus('未选择库目录，已跳过同步')
+      clearStatus()
       return { uploaded: 0, downloaded: 0, skipped: true }
     }
-    try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… 准备中' } catch {}
+    updateStatus('正在同步… 准备中')
     const auth = { username: cfg.username, password: cfg.password }; await syncLog('[prep] root=' + (await getLibraryRoot()) + ' remoteRoot=' + cfg.rootPath)
     try { await ensureRemoteDir(cfg.baseUrl, auth, (cfg.rootPath || '').replace(/\/+$/, '')) } catch {}
 
@@ -551,16 +559,11 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       }
     }
 
-    await syncLog('[plan] total=' + plan.length + ' local=' + localIdx.size + ' remote=' + remoteIdx.size);
-    // 记录详细计划
-    for (const p of plan) {
-      await syncLog('[plan-detail] ' + p.type + ' ' + p.rel)
-    }
     // 设置 deadline：只针对上传/下载循环，不包括扫描时间
     const deadline = Date.now() + (reason === 'shutdown' ? Math.min(5000, cfg.timeoutMs) : cfg.timeoutMs)
     let __processed = 0; let __total = plan.length;
     let __fail = 0; let __lastErr = ""
-    try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… 0/' + __total } catch {}
+    updateStatus(`正在同步… 0/${__total}`)
     let up = 0, down = 0, del = 0, conflicts = 0
     const newMeta: SyncMetadata = { files: {}, lastSyncTime: Date.now() }
 
@@ -653,10 +656,14 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
         try { await syncLog('[fail] ' + act.type + ' ' + act.rel + ' : ' + (e?.message || e)) } catch {}
         __fail++
         try { __lastErr = String(e?.message || e || __lastErr) } catch {}
-        try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… ' + __processed + '/' + __total + '（失败 ' + __fail + '）' } catch {}
+        updateStatus(`同步中… ${__processed}/${__total} (失败 ${__fail})`)
       }
       __processed++
-      try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… ' + __processed + '/' + __total } catch {}
+
+      // 更新状态显示实际操作
+      const shortName = act.rel.length > 30 ? '...' + act.rel.substring(act.rel.length - 27) : act.rel
+      const actionText = act.type === 'upload' ? '↑' : act.type === 'download' ? '↓' : '✗'
+      updateStatus(`${actionText} ${shortName} (${__processed}/${__total})`)
     }
 
     // 保存同步元数据
@@ -669,17 +676,15 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       if (del > 0) msg += `✗${del} `
       if (conflicts > 0) msg += `⚠${conflicts} `
       msg += `）`
-      const el = document.getElementById('status')
-      if (el) {
-        el.textContent = msg
-        setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 1800)
-      }
+      updateStatus(msg)
+      clearStatus()
     } catch {}
     await syncLog('[done] up=' + up + ' down=' + down + ' del=' + del + ' conflicts=' + conflicts + ' total=' + __total);
     return { uploaded: up, downloaded: down }
   } catch (e) { try { await syncLog('[error] ' + (e?.message || e)) } catch {}
     console.warn('sync failed', e)
-    try { const el = document.getElementById('status'); if (el) el.textContent = '同步失败：' + (e?.message || '未知错误'); setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 3000) } catch {}
+    updateStatus('同步失败：' + (e?.message || '未知错误'))
+    clearStatus(3000)
     return null
   } finally {
     // 释放同步锁
