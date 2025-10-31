@@ -38,7 +38,6 @@
             "core:default",
             "core:window:allow-close",
             "core:window:allow-destroy",
-            "http:default",
             "dialog:default",
             "dialog:allow-ask",
             "dialog:allow-open",
@@ -74,72 +73,109 @@
             "fs:allow-appconfig-write-recursive",
             "store:default",
             "opener:default",
-            "window-state:default"
-          ,
-          {
-            "identifier": "fs:allow-open",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-create",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-mkdir",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-read",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-read-file",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-read-text-file",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-read-dir",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-exists",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-stat",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-watch",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-rename",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-remove",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-copy-file",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-write",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-write-file",
-            "allow": ["**"]
-          },
-          {
-            "identifier": "fs:allow-write-text-file",
-            "allow": ["**"]
-          }
+            "window-state:default",
+            {
+              "identifier": "fs:allow-open",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-create",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-mkdir",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-read",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-read-file",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-read-text-file",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-read-dir",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-exists",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-stat",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-watch",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-rename",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-remove",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-copy-file",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-write",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-write-file",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "fs:allow-write-text-file",
+              "allow": [
+                "**"
+              ]
+            },
+            {
+              "identifier": "http:default",
+              "allow": [
+                "https://bora.teracloud.jp/**"
+              ]
+            }
           ]
         }
       ]

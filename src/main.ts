@@ -29,6 +29,7 @@ import appIconUrl from '../flymd.png?url'
 import { decorateCodeBlocks } from './decorate'
 import pkg from '../package.json'
 import { htmlToMarkdown } from './html2md'
+import { initWebdavSync, openWebdavSyncDialog, getWebdavSyncConfig, syncNow as webdavSyncNow } from './extensions/webdavSync'
 // 应用版本号（用于窗口标题/关于弹窗）
 const APP_VERSION: string = (pkg as any)?.version ?? '0.0.0'
 
@@ -193,7 +194,8 @@ type PluginManifest = { id: string; name?: string; version?: string; author?: st
 type InstalledPlugin = { id: string; name?: string; version?: string; enabled?: boolean; dir: string; main: string; builtin?: boolean; description?: string }
 const PLUGINS_DIR = 'flymd/plugins'
 const builtinPlugins: InstalledPlugin[] = [
-  { id: 'uploader-s3', name: '图床 (S3/R2)', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: '粘贴/拖拽图片自动上传，支持 S3/R2 直连，使用设置中的凭据。' }
+  { id: 'uploader-s3', name: '图床 (S3/R2)', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: '粘贴/拖拽图片自动上传，支持 S3/R2 直连，使用设置中的凭据。' },
+  { id: 'webdav-sync', name: 'WebDAV 同步', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: 'F5/启动/关闭前同步，基于修改时间覆盖' }
 ]
 const activePlugins = new Map<string, any>() // id -> module
 const pluginMenuAdded = new Map<string, boolean>() // 限制每个插件仅添加一个菜单项
@@ -3775,6 +3777,7 @@ function bindEvents() {
     try { logInfo('打点:事件绑定完成') } catch {}
     // 扩展：初始化目录并激活已启用扩展
     try { await ensurePluginsDir(); await loadAndActivateEnabledPlugins() } catch {}
+    try { await initWebdavSync() } catch {}
     // 绑定扩展按钮
     try { const btnExt = document.getElementById('btn-extensions'); if (btnExt) btnExt.addEventListener('click', () => { void showExtensionsOverlay(true) }) } catch {}
     // 开启 DevTools 快捷键（生产/开发环境均可）
@@ -4254,37 +4257,30 @@ async function refreshExtensionsUI(): Promise<void> {
   const list1 = document.createElement('div'); list1.className = 'ext-list'
   builtinsEl.appendChild(list1)
   for (const b of builtinPlugins) {
-    const row = document.createElement('div'); row.className = 'ext-item'
-    const meta = document.createElement('div'); meta.className = 'ext-meta'
-    const name = document.createElement('div'); name.className = 'ext-name'; name.textContent = `${b.name} (${b.version})`
-    const desc = document.createElement('div'); desc.className = 'ext-desc'; desc.textContent = b.description || ''
-    meta.appendChild(name); meta.appendChild(desc)
-    const actions = document.createElement('div'); actions.className = 'ext-actions'
-    const btnEnable = document.createElement('button'); btnEnable.className = 'btn'
-    const upCfg = await getUploaderConfig().catch(() => null)
-    const enabled = !!upCfg
-    btnEnable.textContent = enabled ? '已开启' : '开启'
-    btnEnable.addEventListener('click', async () => {
-      try {
-        const cur = await getUploaderConfig().catch(() => null)
-        const next = cur ? null : { enabled: true, accessKeyId: '', secretAccessKey: '', bucket: '', region: 'auto', endpoint: '', forcePathStyle: true, aclPublicRead: true, keyTemplate: '{year}/{month}{fileName}{md5}.{extName}' } as any
-        if (store) {
-          if (next) { await store.set('uploader', next) } else { await store.set('uploader', null) }
-          await store.save()
-        }
-        await refreshExtensionsUI()
-        pluginNotice('已更新图床开关', 'ok', 1200)
-      } catch (e) { showError('更新图床开关失败', e) }
-    })
-    const btnSettings = document.createElement('button'); btnSettings.className = 'btn primary'; btnSettings.textContent = '设置'
-    // 打开内置图床设置对话框
-    btnSettings.addEventListener('click', () => { try { void showExtensionsOverlay(false); void openUploaderDialog() } catch {} })
-    // 隐藏图床扩展开启按钮（扩展弹窗内不展示）
-try { (btnEnable as any).style.display = 'none' } catch {}
-actions.appendChild(btnSettings)
-    row.appendChild(meta); row.appendChild(actions)
-    list1.appendChild(row)
+  const row = document.createElement('div'); row.className = 'ext-item'
+  const meta = document.createElement('div'); meta.className = 'ext-meta'
+  const name = document.createElement('div'); name.className = 'ext-name'; name.textContent = `${b.name} (${b.version})`
+  const desc = document.createElement('div'); desc.className = 'ext-desc'; desc.textContent = b.description || ''
+  meta.appendChild(name); meta.appendChild(desc)
+  const actions = document.createElement('div'); actions.className = 'ext-actions'
+  if (b.id === 'uploader-s3') {
+    const btn = document.createElement('button'); btn.className = 'btn primary'; btn.textContent = '设置'
+    btn.addEventListener('click', () => { try { void showExtensionsOverlay(false); void openUploaderDialog() } catch {} })
+    actions.appendChild(btn)
+  } else if (b.id === 'webdav-sync') {
+    try {
+      const cfg = await getWebdavSyncConfig()
+      const tag = document.createElement('span'); tag.className = 'ext-tag'; tag.textContent = cfg.enabled ? '已开启' : '已关闭'
+      ;(tag as any).style.opacity = '0.75'; (tag as any).style.marginRight = '8px'
+      actions.appendChild(tag)
+    } catch {}
+    const btn2 = document.createElement('button'); btn2.className = 'btn primary'; btn2.textContent = '设置'
+    btn2.addEventListener('click', () => { try { void showExtensionsOverlay(false); void openWebdavSyncDialog() } catch {} })
+    actions.appendChild(btn2)
   }
+  row.appendChild(meta); row.appendChild(actions)
+  list1.appendChild(row)
+}
   host.appendChild(builtinsEl)
 
   // Installed
@@ -4476,10 +4472,6 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
     }
   } catch {}
 }
-
-
-
-
 
 
 
