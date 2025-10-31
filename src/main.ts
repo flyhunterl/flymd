@@ -2202,11 +2202,12 @@ function checkUpdateSilentOnceAfterStartup() {
 async function toggleMode() {
   mode = mode === 'edit' ? 'preview' : 'edit'
   if (mode === 'preview') {
-          try { updateWysiwygVirtualPadding() } catch {}
-      preview.classList.remove('hidden')
+    try { updateWysiwygVirtualPadding() } catch {}
+    try { preview.classList.remove('hidden') } catch {}
+    try { await renderPreview() } catch {}
   } else {
-    if (!wysiwyg) preview.classList.add('hidden')
-    editor.focus()
+    if (!wysiwyg) try { preview.classList.add('hidden') } catch {}
+    try { editor.focus() } catch {}
   }
   ;(document.getElementById('btn-toggle') as HTMLButtonElement).textContent = mode === 'edit' ? '预览' : '编辑'
 }
