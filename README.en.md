@@ -2,14 +2,14 @@
 
 [简体中文](README.md) | English
 
-[![Version](https://img.shields.io/badge/version-v0.0.8-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
 A fast, lightweight, and stable Markdown editor/previewer powered by Tauri.
 
 
-- Extensions & Plugins: manage built-ins and install community extensions (v0.0.9).
+- Extensions & Plugins: manage built-ins and install community extensions (v0.1.0).
 - WYSIWYG overlay: instant rendering while typing; toggle with `Ctrl+Shift+E`.
 - Solid Preview mode: toggle Edit/Preview with `Ctrl+E`.
 - Full Markdown stack: markdown-it, KaTeX (LaTeX), Mermaid, highlight.js.
@@ -27,7 +27,7 @@ See the main README for screenshots.
 ## Install
 
 - Download from Releases and run the installer:
-  - Windows: `flymd_0.0.8_x64_setup.exe` (file name may vary per release)
+  - Windows: `flymd_0.1.0_x64_setup.exe` (file name may vary per release)
 - Requirements:
   - Windows 10/11 (x64) or Linux
   - WebView2 Runtime on Windows (usually preinstalled)
