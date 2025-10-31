@@ -8,7 +8,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:android:init": "tauri android init",
+    "tauri:android:dev": "tauri android dev",
+    "tauri:android:build": "tauri android build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
@@ -31,4 +34,3 @@
     "punycode": "^2.3.0"
   }
 }
-

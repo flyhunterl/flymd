@@ -434,16 +434,24 @@ async fn s3_get_object_to_path(req: S3GetReq) -> Result<(), String> {
   Ok(())
 }
 // ===== CODEX SYNC S3 END =====
+
 fn main() {
-  tauri::Builder::default()
+  let mut builder = tauri::Builder::default()
     .manage(PendingOpenPath::default())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_opener::init())
-    .plugin(tauri_plugin_http::init())
-    .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file, run_installer, s3_list_objects, s3_get_object_to_path, s3_delete_object])
+    .plugin(tauri_plugin_http::init());
+
+  #[cfg(not(target_os = "android"))]
+  {
+    builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+  }
+
+  builder
+
+    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file, run_installer, s3_list_objects, s3_get_object_to_path, s3_delete_object])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
@@ -860,3 +868,4 @@ async fn run_installer(path: String) -> Result<(), String> {
     Err("run_installer only supports Windows".into())
   }
 }
+

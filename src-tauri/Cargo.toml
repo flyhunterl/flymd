@@ -16,7 +16,6 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-store = "2"
-tauri-plugin-window-state = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
@@ -29,7 +28,6 @@ hex = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 aws-config = { version = "1", features = ["rt-tokio", "behavior-version-latest"] }
 aws-sdk-s3 = { version = "1", features = ["rt-tokio"] }
-trash = "3"
 futures-util = "0.3"
 
 [profile.release]
@@ -40,3 +38,7 @@ lto = true
 strip = true
 
 
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-window-state = "2"
+trash = "3"
