@@ -182,7 +182,7 @@
             {
               "identifier": "http:default",
               "allow": [
-                "https://bora.teracloud.jp/**"
+                "https://**"
               ]
             }
           ]
