@@ -26,6 +26,7 @@ type SyncMetadata = {
     [path: string]: {
       hash: string
       mtime: number
+      size: number  // 添加文件大小字段
       syncTime: number
     }
   }
@@ -42,7 +43,21 @@ async function getSyncMetadata(): Promise<SyncMetadata> {
     }
     const data = await readFile(metaPath as any)
     const text = new TextDecoder().decode(data)
-    return JSON.parse(text) as SyncMetadata
+    const rawMeta = JSON.parse(text) as any
+
+    // 兼容旧格式：确保所有文件条目都有 size 字段
+    const files: SyncMetadata['files'] = {}
+    for (const [path, meta] of Object.entries(rawMeta.files || {})) {
+      const m = meta as any
+      files[path] = {
+        hash: m.hash || '',
+        mtime: m.mtime || 0,
+        size: m.size || 0,  // 旧格式没有 size，默认为 0
+        syncTime: m.syncTime || 0
+      }
+    }
+
+    return { files, lastSyncTime: rawMeta.lastSyncTime || 0 }
   } catch (e) {
     console.warn('读取同步元数据失败', e)
     return { files: {}, lastSyncTime: 0 }
@@ -169,9 +184,9 @@ function toEpochMs(v: any): number {
   const n = Number(v); return Number.isFinite(n) ? n : 0
 }
 
-type FileEntry = { path: string; mtime: number; hash?: string; isDir?: boolean }
+type FileEntry = { path: string; mtime: number; size: number; hash?: string; isDir?: boolean }
 
-async function scanLocal(root: string): Promise<Map<string, FileEntry>> {
+async function scanLocal(root: string, lastMeta?: SyncMetadata): Promise<Map<string, FileEntry>> {
   const map = new Map<string, FileEntry>()
   async function walk(dir: string, rel: string) {
     let ents: any[] = []
@@ -195,15 +210,25 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
         } else {
           const meta = await stat(full)
           const mt = toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs)
+          const size = Number((meta as any)?.size || 0)
           const __relUnix = relp.replace(/\\\\/g, '/')
           if (!/\.(md|markdown|txt|png|jpg|jpeg|gif|svg|pdf)$/i.test(__relUnix)) { await syncLog('[scan-skip-ext] ' + __relUnix); continue }
 
-          // 读取文件并计算哈希
-          const fileData = await readFile(full as any)
-          const hash = await calculateFileHash(fileData as Uint8Array)
+          // 优化：检查是否可以复用上次的哈希
+          const lastFile = lastMeta?.files[__relUnix]
+          let hash = ''
+          if (lastFile && lastFile.mtime === mt && lastFile.size === size) {
+            // 文件没有变化，复用上次的哈希
+            hash = lastFile.hash
+            await syncLog('[scan-ok] ' + __relUnix + ' hash=' + hash.substring(0, 8) + ' (cached)')
+          } else {
+            // 文件有变化，重新计算哈希
+            const fileData = await readFile(full as any)
+            hash = await calculateFileHash(fileData as Uint8Array)
+            await syncLog('[scan-ok] ' + __relUnix + ' hash=' + hash.substring(0, 8) + ' (calculated)')
+          }
 
-          await syncLog('[scan-ok] ' + __relUnix + ' hash=' + hash.substring(0, 8))
-          map.set(__relUnix, { path: __relUnix, mtime: mt, hash })
+          map.set(__relUnix, { path: __relUnix, mtime: mt, size, hash })
         }
       } catch {}
     }
@@ -252,7 +277,14 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
       // 取最后一段作为 name
       const segs = href.replace(/\/+$/,'').split('/')
       const name = segs.pop() || ''
-      const isDir = /<d:collection\b/i.test(typeEl?.outerHTML || '')
+      // 改进目录判断：多种方式判断
+      // 1. 检查 resourcetype 是否包含 collection
+      // 2. 检查 href 是否以 / 结尾（很多WebDAV服务器用这个表示目录）
+      const typeXml = typeEl?.outerHTML || typeEl?.innerHTML || ''
+      const isDir = /<d:collection\b/i.test(typeXml) ||
+                    /<collection\b/i.test(typeXml) ||
+                    /\bcollection\b/i.test(typeXml) ||
+                    (hrefEl?.textContent || '').endsWith('/')
       const mt = mEl?.textContent ? toEpochMs(mEl.textContent) : undefined
       files.push({ name, isDir, mtime: mt })
     }
@@ -322,14 +354,14 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     const auth = { username: cfg.username, password: cfg.password }; await syncLog('[prep] root=' + (await getLibraryRoot()) + ' remoteRoot=' + cfg.rootPath)
     try { await ensureRemoteDir(cfg.baseUrl, auth, (cfg.rootPath || '').replace(/\/+$/, '')) } catch {}
 
-    // 发现差异
-    const [localIdx, remoteIdx] = await Promise.all([
-      scanLocal(localRoot),
-      listRemoteRecursively(cfg.baseUrl, auth, cfg.rootPath)
-    ])
-
     // 获取上次同步的元数据
     const lastMeta = await getSyncMetadata()
+
+    // 发现差异
+    const [localIdx, remoteIdx] = await Promise.all([
+      scanLocal(localRoot, lastMeta),  // 传入 lastMeta 用于哈希缓存
+      listRemoteRecursively(cfg.baseUrl, auth, cfg.rootPath)
+    ])
 
     const plan: { type: 'upload' | 'download' | 'delete' | 'conflict'; rel: string; reason?: string }[] = []
     const allKeys = new Set<string>([...localIdx.keys(), ...remoteIdx.keys(), ...Object.keys(lastMeta.files)])
@@ -449,7 +481,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
               up++
               // 记录到元数据
               const meta = await stat(full)
-              newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
+              newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), size: Number((meta as any)?.size || 0), syncTime: Date.now() }
             } else {
               // 用户选择保留远程 → 下载
               await syncLog('[conflict-resolve] ' + act.rel + ' 用户选择保留远程版本')
@@ -462,7 +494,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
               down++
               // 记录到元数据
               const meta = await stat(full)
-              newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
+              newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), size: Number((meta as any)?.size || 0), syncTime: Date.now() }
             }
           } catch (e) {
             await syncLog('[conflict-error] ' + act.rel + ' 处理冲突失败: ' + (e?.message || e))
@@ -485,7 +517,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
             await syncLog('[ok] download ' + act.rel)
             // 记录到元数据
             const meta = await stat(full)
-            newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
+            newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), size: Number((meta as any)?.size || 0), syncTime: Date.now() }
           }
         } else if (act.type === 'upload') {
           await syncLog('[upload] ' + act.rel + ' (' + act.reason + ')')
@@ -501,7 +533,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           await syncLog('[ok] upload ' + act.rel)
           // 记录到元数据
           const meta = await stat(full)
-          newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
+          newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), size: Number((meta as any)?.size || 0), syncTime: Date.now() }
         } else if (act.type === 'delete') {
           // 不再自动删除远程文件，只记录警告
           await syncLog('[skip-delete-remote] ' + act.rel + ' 为了安全，不自动删除远程文件')
