@@ -4,6 +4,8 @@
 
 import { Store } from '@tauri-apps/plugin-store'
 import { readDir, stat, readFile, writeFile, mkdir, exists, open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
+import { appLocalDataDir } from '@tauri-apps/api/path'
+import { openPath } from '@tauri-apps/plugin-opener'
 
 async function syncLog(msg: string): Promise<void> {
   try {
@@ -11,6 +13,17 @@ async function syncLog(msg: string): Promise<void> {
     const f = await openFileHandle('flymd-sync.log' as any, { write: true, append: true, create: true, baseDir: BaseDirectory.AppLocalData } as any)
     try { await (f as any).write(enc as any) } finally { try { await (f as any).close() } catch {} }
   } catch {}
+}
+
+async function openSyncLog(): Promise<void> {
+  try {
+    const localDataDir = await appLocalDataDir()
+    const logPath = localDataDir + (localDataDir.includes('\\') ? '\\' : '/') + 'flymd-sync.log'
+    await openPath(logPath)
+  } catch (e) {
+    console.warn('打开日志失败', e)
+    alert('打开日志失败: ' + (e?.message || e))
+  }
 }
 
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -45,7 +58,7 @@ export async function getWebdavSyncConfig(): Promise<WebdavSyncConfig> {
     enabled: raw?.enabled !== false,
     onStartup: raw?.onStartup !== false,
     onShutdown: raw?.onShutdown !== false,
-    timeoutMs: Number(raw?.timeoutMs) > 0 ? Number(raw?.timeoutMs) : 20000,
+    timeoutMs: Number(raw?.timeoutMs) > 0 ? Number(raw?.timeoutMs) : 120000,
     includeGlobs: Array.isArray(raw?.includeGlobs) ? raw.includeGlobs : ['**/*.md', '**/*.{png,jpg,jpeg,gif,svg,pdf}'],
     excludeGlobs: Array.isArray(raw?.excludeGlobs) ? raw.excludeGlobs : ['**/.git/**','**/.trash/**','**/.DS_Store','**/Thumbs.db'],
     baseUrl: String(raw?.baseUrl || ''),
@@ -110,7 +123,7 @@ async function scanLocal(root: string): Promise<Map<string, FileEntry>> {
     try { ents = await readDir(dir, { recursive: false } as any) as any[] } catch { ents = [] }
     for (const e of ents) {
       const name = String(e.name || '')
-if (name.startsWith('.')) { continue }
+if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '/' : '') + name); continue }
       if (!name) continue
       const full = dir + (dir.includes('\\') ? '\\' : '/') + name
       const relp = rel ? rel + '/' + name : name
@@ -121,7 +134,8 @@ if (name.startsWith('.')) { continue }
           const meta = await stat(full)
           const mt = toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs)
           const __relUnix = relp.replace(/\\\\/g, '/')
-          if (!/\.(md|markdown|txt|png|jpg|jpeg|gif|svg|pdf)$/i.test(__relUnix)) { continue }
+          if (!/\.(md|markdown|txt|png|jpg|jpeg|gif|svg|pdf)$/i.test(__relUnix)) { await syncLog('[scan-skip-ext] ' + __relUnix); continue }
+          await syncLog('[scan-ok] ' + __relUnix)
           map.set(__relUnix, { path: __relUnix, mtime: mt })
         }
       } catch {}
@@ -228,7 +242,6 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     if (!cfg.enabled) return { uploaded: 0, downloaded: 0, skipped: true }
     const localRoot = await getLibraryRoot(); if (!localRoot) { try { const el = document.getElementById('status'); if (el) el.textContent = '未选择库目录，已跳过同步'; setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 1800) } catch {}; return { uploaded: 0, downloaded: 0, skipped: true } }
     try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… 准备中' } catch {}
-    const deadline = Date.now() + (reason === 'shutdown' ? Math.min(5000, cfg.timeoutMs) : cfg.timeoutMs)
     const auth = { username: cfg.username, password: cfg.password }; await syncLog('[prep] root=' + (await getLibraryRoot()) + ' remoteRoot=' + cfg.rootPath)
     try { await ensureRemoteDir(cfg.baseUrl, auth, (cfg.rootPath || '').replace(/\/+$/, '')) } catch {}
 
@@ -253,12 +266,21 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       }
     }
     await syncLog('[plan] total=' + plan.length + ' local=' + localIdx.size + ' remote=' + remoteIdx.size);
+    // 记录详细计划
+    for (const p of plan) {
+      await syncLog('[plan-detail] ' + p.type + ' ' + p.rel)
+    }
+    // 设置 deadline：只针对上传/下载循环，不包括扫描时间
+    const deadline = Date.now() + (reason === 'shutdown' ? Math.min(5000, cfg.timeoutMs) : cfg.timeoutMs)
     let __processed = 0; let __total = plan.length;
     let __fail = 0; let __lastErr = ""
     try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… 0/' + __total } catch {}
     let up = 0, down = 0
     for (const act of plan) {
-      if (Date.now() > deadline) break
+      if (Date.now() > deadline) {
+        await syncLog('[timeout] 超时中断，剩余 ' + (plan.length - __processed) + ' 个任务未完成')
+        break
+      }
       try {
         if (act.type === 'download') {
           await syncLog('[download] ' + act.rel)
@@ -270,14 +292,8 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           down++
           await syncLog('[ok] download ' + act.rel)
         } else if (act.type === 'upload') {
-          // 过滤：隐藏项/目录/非白名单扩展，避免 os error 5
-          if (act.rel.split('/').some(seg => seg.startsWith('.'))) { continue }
-          const __extOk = /\.(md|markdown|txt|png|jpg|jpeg|gif|svg|pdf)$/i.test(act.rel)
-          if (!__extOk) { continue }
-          const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
-          const __meta = await stat(full as any).catch(() => null) as any
-          if (!__meta || __meta.isDir === true || __meta.isDirectory === true) { continue }
           await syncLog('[upload] ' + act.rel)
+          const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
           const buf = await readFile(full as any)
           const relPath = encodePath(act.rel)
           const relDir = relPath.split('/').slice(0, -1).join('/')
@@ -343,13 +359,14 @@ export async function openWebdavSyncDialog(): Promise<void> {
         <label>启用同步</label><input id="sync-enabled" type="checkbox"/>
         <label>启动时同步</label><input id="sync-onstartup" type="checkbox"/>
         <label>关闭前同步</label><input id="sync-onshutdown" type="checkbox"/>
-        <label>超时(毫秒)</label><input id="sync-timeout" type="number" min="1000" step="1000" placeholder="20000"/>
+        <label>超时(毫秒)</label><input id="sync-timeout" type="number" min="1000" step="1000" placeholder="120000"/>
         <label>Base URL</label><input id="sync-baseurl" type="text" placeholder="https://dav.example.com/remote.php/dav/files/user"/>
         <label>Root Path</label><input id="sync-root" type="text" placeholder="/flymd"/>
         <label>用户名</label><input id="sync-user" type="text"/>
         <label>密码</label><input id="sync-pass" type="password"/>
       </div>
       <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+        <button id="sync-openlog" class="btn">打开日志</button>
         <button id="sync-test" class="btn">立即同步(F5)</button>
         <button id="sync-save" class="btn primary">保存</button>
       </div>
@@ -361,6 +378,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
   const btnClose = overlay.querySelector('#sync-close') as HTMLButtonElement
   const btnSave = overlay.querySelector('#sync-save') as HTMLButtonElement
   const btnTest = overlay.querySelector('#sync-test') as HTMLButtonElement
+  const btnOpenLog = overlay.querySelector('#sync-openlog') as HTMLButtonElement
   const elEnabled = overlay.querySelector('#sync-enabled') as HTMLInputElement
   const elOnStartup = overlay.querySelector('#sync-onstartup') as HTMLInputElement
   const elOnShutdown = overlay.querySelector('#sync-onshutdown') as HTMLInputElement
@@ -374,7 +392,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
   elEnabled.checked = !!cfg.enabled
   elOnStartup.checked = !!cfg.onStartup
   elOnShutdown.checked = !!cfg.onShutdown
-  elTimeout.value = String(cfg.timeoutMs || 20000)
+  elTimeout.value = String(cfg.timeoutMs || 120000)
   elBase.value = cfg.baseUrl || ''
   elRoot.value = cfg.rootPath || '/flymd'
   elUser.value = cfg.username || ''
@@ -386,7 +404,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
         enabled: elEnabled.checked,
         onStartup: elOnStartup.checked,
         onShutdown: elOnShutdown.checked,
-        timeoutMs: Math.max(1000, Number(elTimeout.value) || 20000),
+        timeoutMs: Math.max(1000, Number(elTimeout.value) || 120000),
         baseUrl: elBase.value.trim(),
         rootPath: elRoot.value.trim() || '/flymd',
         username: elUser.value,
@@ -398,6 +416,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
     } catch (e) { alert('保存失败: ' + e) }
   }
   btnTest.onclick = () => { void syncNow('manual') }
+  btnOpenLog.onclick = () => { void openSyncLog() }
   btnClose.onclick = () => show(false)
   overlay.addEventListener('click', (e) => { if (e.target === overlay) show(false) })
   show(true)

@@ -73,6 +73,15 @@
             "fs:allow-appconfig-write-recursive",
             "store:default",
             "opener:default",
+            "opener:allow-open-path",
+            {
+              "identifier": "opener:allow-open-path",
+              "allow": [
+                {
+                  "path": "$APPLOCALDATA/*"
+                }
+              ]
+            },
             "window-state:default",
             {
               "identifier": "fs:allow-open",
