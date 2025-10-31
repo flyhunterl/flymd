@@ -3,9 +3,64 @@
 // - 仅按最后修改时间比较；新者覆盖旧者；不做合并
 
 import { Store } from '@tauri-apps/plugin-store'
-import { readDir, stat, readFile, writeFile, mkdir, exists, open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
+import { readDir, stat, readFile, writeFile, mkdir, exists, open as openFileHandle, BaseDirectory, remove } from '@tauri-apps/plugin-fs'
 import { appLocalDataDir } from '@tauri-apps/api/path'
 import { openPath } from '@tauri-apps/plugin-opener'
+
+// 计算文件内容的 MD5 哈希
+async function calculateFileHash(data: Uint8Array): Promise<string> {
+  try {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+    return hashHex
+  } catch (e) {
+    console.warn('计算哈希失败', e)
+    return ''
+  }
+}
+
+// 同步元数据类型
+type SyncMetadata = {
+  files: {
+    [path: string]: {
+      hash: string
+      mtime: number
+      syncTime: number
+    }
+  }
+  lastSyncTime: number
+}
+
+// 获取同步元数据
+async function getSyncMetadata(): Promise<SyncMetadata> {
+  try {
+    const localDataDir = await appLocalDataDir()
+    const metaPath = localDataDir + (localDataDir.includes('\\') ? '\\' : '/') + 'flymd-sync-meta.json'
+    if (!(await exists(metaPath as any))) {
+      return { files: {}, lastSyncTime: 0 }
+    }
+    const data = await readFile(metaPath as any)
+    const text = new TextDecoder().decode(data)
+    return JSON.parse(text) as SyncMetadata
+  } catch (e) {
+    console.warn('读取同步元数据失败', e)
+    return { files: {}, lastSyncTime: 0 }
+  }
+}
+
+// 保存同步元数据
+async function saveSyncMetadata(meta: SyncMetadata): Promise<void> {
+  try {
+    const localDataDir = await appLocalDataDir()
+    const metaPath = localDataDir + (localDataDir.includes('\\') ? '\\' : '/') + 'flymd-sync-meta.json'
+    const text = JSON.stringify(meta, null, 2)
+    const data = new TextEncoder().encode(text)
+    await writeFile(metaPath as any, data as any)
+  } catch (e) {
+    console.warn('保存同步元数据失败', e)
+  }
+}
 
 async function syncLog(msg: string): Promise<void> {
   try {
@@ -114,7 +169,7 @@ function toEpochMs(v: any): number {
   const n = Number(v); return Number.isFinite(n) ? n : 0
 }
 
-type FileEntry = { path: string; mtime: number; isDir?: boolean }
+type FileEntry = { path: string; mtime: number; hash?: string; isDir?: boolean }
 
 async function scanLocal(root: string): Promise<Map<string, FileEntry>> {
   const map = new Map<string, FileEntry>()
@@ -142,8 +197,13 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
           const mt = toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs)
           const __relUnix = relp.replace(/\\\\/g, '/')
           if (!/\.(md|markdown|txt|png|jpg|jpeg|gif|svg|pdf)$/i.test(__relUnix)) { await syncLog('[scan-skip-ext] ' + __relUnix); continue }
-          await syncLog('[scan-ok] ' + __relUnix)
-          map.set(__relUnix, { path: __relUnix, mtime: mt })
+
+          // 读取文件并计算哈希
+          const fileData = await readFile(full as any)
+          const hash = await calculateFileHash(fileData as Uint8Array)
+
+          await syncLog('[scan-ok] ' + __relUnix + ' hash=' + hash.substring(0, 8))
+          map.set(__relUnix, { path: __relUnix, mtime: mt, hash })
         }
       } catch {}
     }
@@ -243,6 +303,16 @@ async function uploadFile(baseUrl: string, auth: { username: string; password: s
   if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
 }
 
+async function deleteRemoteFile(baseUrl: string, auth: { username: string; password: string }, remotePath: string): Promise<void> {
+  const http = await getHttpClient(); if (!http) throw new Error('no http client')
+  const url = joinUrl(baseUrl, remotePath)
+  const authStr = btoa(`${auth.username}:${auth.password}`)
+  const headers: Record<string,string> = { Authorization: `Basic ${authStr}` }
+  const resp = await http.fetch(url, { method: 'DELETE', headers })
+  const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
+  if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
+}
+
 export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; downloaded: number; skipped?: boolean } | null> {
   try {
     const cfg = await getWebdavSyncConfig()
@@ -258,20 +328,84 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       listRemoteRecursively(cfg.baseUrl, auth, cfg.rootPath)
     ])
 
-    const plan: { type: 'upload' | 'download'; rel: string }[] = []
-    const allKeys = new Set<string>([...localIdx.keys(), ...remoteIdx.keys()])
+    // 获取上次同步的元数据
+    const lastMeta = await getSyncMetadata()
+
+    const plan: { type: 'upload' | 'download' | 'delete' | 'conflict'; rel: string; reason?: string }[] = []
+    const allKeys = new Set<string>([...localIdx.keys(), ...remoteIdx.keys(), ...Object.keys(lastMeta.files)])
+
     for (const k of allKeys) {
-      const l = localIdx.get(k)
-      const r = remoteIdx.get(k)
-      if (l && !r) plan.push({ type: 'upload', rel: k })
-      else if (!l && r) plan.push({ type: 'download', rel: k })
-      else if (l && r) {
-        const lm = Number(l.mtime) + (cfg.clockSkewMs || 0)
-        const rm = Number(r.mtime) - (cfg.clockSkewMs || 0)
-        if (lm > rm) plan.push({ type: 'upload', rel: k })
-        else if (rm > lm) plan.push({ type: 'download', rel: k })
+      const local = localIdx.get(k)
+      const remote = remoteIdx.get(k)
+      const last = lastMeta.files[k]
+
+      // 情况1：本地有，远程无
+      if (local && !remote) {
+        if (last) {
+          // 上次同步过，现在远程没有了 → 远程被删除，删除本地
+          plan.push({ type: 'download', rel: k, reason: 'remote-deleted' })
+          await syncLog('[detect] ' + k + ' 远程已删除，将删除本地文件')
+        } else {
+          // 上次没同步过 → 本地新增，上传
+          plan.push({ type: 'upload', rel: k, reason: 'local-new' })
+        }
+      }
+      // 情况2：本地无，远程有
+      else if (!local && remote) {
+        if (last) {
+          // 上次同步过，现在本地没有了 → 本地被删除，删除远程
+          plan.push({ type: 'delete', rel: k, reason: 'local-deleted' })
+          await syncLog('[detect] ' + k + ' 本地已删除，将删除远程文件')
+        } else {
+          // 上次没同步过 → 远程新增，下载
+          plan.push({ type: 'download', rel: k, reason: 'remote-new' })
+        }
+      }
+      // 情况3：本地和远程都有
+      else if (local && remote) {
+        // 先下载远程文件计算哈希
+        let remoteHash = ''
+        try {
+          const remoteData = await downloadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(k))
+          remoteHash = await calculateFileHash(remoteData)
+        } catch (e) {
+          await syncLog('[warn] ' + k + ' 无法下载远程文件计算哈希: ' + (e?.message || e))
+        }
+
+        const localHash = local.hash || ''
+        const lastHash = last?.hash || ''
+
+        // 哈希相同 → 无需同步
+        if (localHash === remoteHash) {
+          await syncLog('[skip] ' + k + ' 哈希相同，跳过')
+          continue
+        }
+
+        // 检查是否冲突：本地和远程都相对于上次同步发生了变化
+        const localChanged = localHash !== lastHash
+        const remoteChanged = remoteHash !== lastHash
+
+        if (localChanged && remoteChanged) {
+          // 冲突！两边都修改了
+          plan.push({ type: 'conflict', rel: k, reason: 'both-modified' })
+          await syncLog('[conflict!] ' + k + ' 本地和远程都已修改')
+        } else if (localChanged) {
+          // 只有本地改了 → 上传
+          plan.push({ type: 'upload', rel: k, reason: 'local-modified' })
+        } else if (remoteChanged) {
+          // 只有远程改了 → 下载
+          plan.push({ type: 'download', rel: k, reason: 'remote-modified' })
+        } else {
+          // 都没改，但哈希不同（理论上不应该发生）
+          // 按时间戳处理
+          const lm = Number(local.mtime) + (cfg.clockSkewMs || 0)
+          const rm = Number(remote.mtime) - (cfg.clockSkewMs || 0)
+          if (lm > rm) plan.push({ type: 'upload', rel: k, reason: 'local-newer-time' })
+          else if (rm > lm) plan.push({ type: 'download', rel: k, reason: 'remote-newer-time' })
+        }
       }
     }
+
     await syncLog('[plan] total=' + plan.length + ' local=' + localIdx.size + ' remote=' + remoteIdx.size);
     // 记录详细计划
     for (const p of plan) {
@@ -282,26 +416,82 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     let __processed = 0; let __total = plan.length;
     let __fail = 0; let __lastErr = ""
     try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… 0/' + __total } catch {}
-    let up = 0, down = 0
+    let up = 0, down = 0, del = 0, conflicts = 0
+    const newMeta: SyncMetadata = { files: {}, lastSyncTime: Date.now() }
+
     for (const act of plan) {
       if (Date.now() > deadline) {
         await syncLog('[timeout] 超时中断，剩余 ' + (plan.length - __processed) + ' 个任务未完成')
         break
       }
       try {
-        if (act.type === 'download') {
-          await syncLog('[download] ' + act.rel)
-          const data = await downloadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
-          const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
-          const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
-          if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
-          await writeFile(full as any, data as any)
-          down++
-          await syncLog('[ok] download ' + act.rel)
+        if (act.type === 'conflict') {
+          // 处理冲突：提示用户
+          conflicts++
+          await syncLog('[conflict] ' + act.rel + ' - 需要手动处理')
+          try {
+            const msg = `文件冲突：${act.rel}\n\n本地和远程都已修改。\n\n请选择：\n- 确定：保留本地版本（上传）\n- 取消：保留远程版本（下载）`
+            if (confirm(msg)) {
+              // 用户选择保留本地 → 上传
+              await syncLog('[conflict-resolve] ' + act.rel + ' 用户选择保留本地版本')
+              const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
+              const buf = await readFile(full as any)
+              const hash = await calculateFileHash(buf as Uint8Array)
+              const relPath = encodePath(act.rel)
+              const relDir = relPath.split('/').slice(0, -1).join('/')
+              const remoteDir = (cfg.rootPath || '').replace(/\/+$/, '') + (relDir ? '/' + relDir : '')
+              await ensureRemoteDir(cfg.baseUrl, auth, remoteDir)
+              await uploadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel), buf as any)
+              up++
+              // 记录到元数据
+              const meta = await stat(full)
+              newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
+            } else {
+              // 用户选择保留远程 → 下载
+              await syncLog('[conflict-resolve] ' + act.rel + ' 用户选择保留远程版本')
+              const data = await downloadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
+              const hash = await calculateFileHash(data)
+              const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
+              const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
+              if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
+              await writeFile(full as any, data as any)
+              down++
+              // 记录到元数据
+              const meta = await stat(full)
+              newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
+            }
+          } catch (e) {
+            await syncLog('[conflict-error] ' + act.rel + ' 处理冲突失败: ' + (e?.message || e))
+          }
+        } else if (act.type === 'download') {
+          if (act.reason === 'remote-deleted') {
+            // 删除本地文件
+            await syncLog('[delete-local] ' + act.rel)
+            const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
+            try { await remove(full as any) } catch {}
+            del++
+            await syncLog('[ok] delete-local ' + act.rel)
+            // 从元数据中移除
+          } else {
+            // 正常下载
+            await syncLog('[download] ' + act.rel + ' (' + act.reason + ')')
+            const data = await downloadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
+            const hash = await calculateFileHash(data)
+            const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
+            const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
+            if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
+            await writeFile(full as any, data as any)
+            down++
+            await syncLog('[ok] download ' + act.rel)
+            // 记录到元数据
+            const meta = await stat(full)
+            newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
+          }
         } else if (act.type === 'upload') {
-          await syncLog('[upload] ' + act.rel)
+          await syncLog('[upload] ' + act.rel + ' (' + act.reason + ')')
           const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
           const buf = await readFile(full as any)
+          const hash = await calculateFileHash(buf as Uint8Array)
           const relPath = encodePath(act.rel)
           const relDir = relPath.split('/').slice(0, -1).join('/')
           const remoteDir = (cfg.rootPath || '').replace(/\/+$/, '') + (relDir ? '/' + relDir : '')
@@ -309,6 +499,16 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           await uploadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel), buf as any)
           up++
           await syncLog('[ok] upload ' + act.rel)
+          // 记录到元数据
+          const meta = await stat(full)
+          newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
+        } else if (act.type === 'delete') {
+          // 删除远程文件
+          await syncLog('[delete-remote] ' + act.rel + ' (' + act.reason + ')')
+          await deleteRemoteFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
+          del++
+          await syncLog('[ok] delete-remote ' + act.rel)
+          // 从元数据中移除
         }
       } catch (e) {
         console.warn('sync step failed', act, e)
@@ -320,8 +520,24 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       __processed++
       try { const el = document.getElementById('status'); if (el) el.textContent = '正在同步… ' + __processed + '/' + __total } catch {}
     }
-    try { const el = document.getElementById('status'); if (el) el.textContent = `同步完成（↑${up} / ↓${down}）`; setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 1800) } catch {}
-    await syncLog('[done] up=' + up + ' down=' + down + ' total=' + __total);
+
+    // 保存同步元数据
+    await saveSyncMetadata(newMeta)
+
+    try {
+      let msg = `同步完成（`
+      if (up > 0) msg += `↑${up} `
+      if (down > 0) msg += `↓${down} `
+      if (del > 0) msg += `✗${del} `
+      if (conflicts > 0) msg += `⚠${conflicts} `
+      msg += `）`
+      const el = document.getElementById('status')
+      if (el) {
+        el.textContent = msg
+        setTimeout(() => { try { if (el) el.textContent = '' } catch {} }, 1800)
+      }
+    } catch {}
+    await syncLog('[done] up=' + up + ' down=' + down + ' del=' + del + ' conflicts=' + conflicts + ' total=' + __total);
     return { uploaded: up, downloaded: down }
   } catch (e) { try { await syncLog('[error] ' + (e?.message || e)) } catch {}
     console.warn('sync failed', e)
