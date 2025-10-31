@@ -516,6 +516,11 @@ export function openSettings(context) {
    ```
    https://example.com/plugins/my-plugin/manifest.json
    ```
+   
+## 提交插件/扩展到应用内市场
+
+将插件/扩展地址及说明发送到fly@llingfei.com或issue
+
 
 ## 最佳实践
 
@@ -614,12 +619,6 @@ export function activate(context) {
   // 继续初始化...
 }
 ```
-
-## 提交扩展到应用内市场
-
-将扩展地址及说明发送到fly@llingfei.com或issue
-
-
 
 ## 常见问题
 
