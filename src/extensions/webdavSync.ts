@@ -342,9 +342,11 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       // 情况1：本地有，远程无
       if (local && !remote) {
         if (last) {
-          // 上次同步过，现在远程没有了 → 远程被删除，删除本地
-          plan.push({ type: 'download', rel: k, reason: 'remote-deleted' })
-          await syncLog('[detect] ' + k + ' 远程已删除，将删除本地文件')
+          // 上次同步过，现在远程没有了 → 可能是远程被删除，但也可能是编码问题或其他误判
+          // 为了安全起见，不自动删除本地文件，而是记录警告
+          await syncLog('[warn] ' + k + ' 远程未找到，但为了安全不删除本地文件（可能是误判）')
+          // 不再执行删除操作
+          // plan.push({ type: 'download', rel: k, reason: 'remote-deleted' })
         } else {
           // 上次没同步过 → 本地新增，上传
           plan.push({ type: 'upload', rel: k, reason: 'local-new' })
@@ -353,9 +355,11 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       // 情况2：本地无，远程有
       else if (!local && remote) {
         if (last) {
-          // 上次同步过，现在本地没有了 → 本地被删除，删除远程
-          plan.push({ type: 'delete', rel: k, reason: 'local-deleted' })
-          await syncLog('[detect] ' + k + ' 本地已删除，将删除远程文件')
+          // 上次同步过，现在本地没有了 → 可能是本地被删除，但也可能是扫描遗漏等问题
+          // 为了安全起见，不自动删除远程文件，而是记录警告
+          await syncLog('[warn] ' + k + ' 本地未找到，但为了安全不删除远程文件（可能是误判）')
+          // 不再执行删除操作
+          // plan.push({ type: 'delete', rel: k, reason: 'local-deleted' })
         } else {
           // 上次没同步过 → 远程新增，下载
           plan.push({ type: 'download', rel: k, reason: 'remote-new' })
@@ -465,13 +469,9 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           }
         } else if (act.type === 'download') {
           if (act.reason === 'remote-deleted') {
-            // 删除本地文件
-            await syncLog('[delete-local] ' + act.rel)
-            const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
-            try { await remove(full as any) } catch {}
-            del++
-            await syncLog('[ok] delete-local ' + act.rel)
-            // 从元数据中移除
+            // 不再自动删除本地文件，只记录警告
+            await syncLog('[skip-delete-local] ' + act.rel + ' 为了安全，不自动删除本地文件')
+            // 从元数据中移除（但不删除实际文件）
           } else {
             // 正常下载
             await syncLog('[download] ' + act.rel + ' (' + act.reason + ')')
@@ -503,12 +503,9 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           const meta = await stat(full)
           newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), syncTime: Date.now() }
         } else if (act.type === 'delete') {
-          // 删除远程文件
-          await syncLog('[delete-remote] ' + act.rel + ' (' + act.reason + ')')
-          await deleteRemoteFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
-          del++
-          await syncLog('[ok] delete-remote ' + act.rel)
-          // 从元数据中移除
+          // 不再自动删除远程文件，只记录警告
+          await syncLog('[skip-delete-remote] ' + act.rel + ' 为了安全，不自动删除远程文件')
+          // 从元数据中移除（但不删除实际文件）
         }
       } catch (e) {
         console.warn('sync step failed', act, e)
