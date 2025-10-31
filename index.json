@@ -16,7 +16,7 @@
     },
     {
       "homepage": "https://github.com/flyhunterl/flymd",
-      "name": "字数统计（测试插件）",
+      "name": "字数统计",
       "description": "显示当前文档的字符数",
       "author": "flyMD",
       "id": "wordcount",
