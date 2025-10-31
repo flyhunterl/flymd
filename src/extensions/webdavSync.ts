@@ -560,7 +560,8 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     }
 
     // 设置 deadline：只针对上传/下载循环，不包括扫描时间
-    const deadline = Date.now() + (reason === 'shutdown' ? Math.min(5000, cfg.timeoutMs) : cfg.timeoutMs)
+    // 关闭前同步给更多时间（最多60秒），让同步能完整完成
+    const deadline = Date.now() + (reason === 'shutdown' ? Math.min(60000, cfg.timeoutMs) : cfg.timeoutMs)
     let __processed = 0; let __total = plan.length;
     let __fail = 0; let __lastErr = ""
     updateStatus(`正在同步… 0/${__total}`)
@@ -710,10 +711,62 @@ export async function initWebdavSync(): Promise<void> {
         }
       }, { capture: true })  // 使用捕获阶段，优先拦截
     } catch {}
+
     // 启动后触发一次
     if (cfg.enabled && cfg.onStartup) { setTimeout(() => { void syncNow('startup') }, 600) }
-    // 关闭前触发（异步，不阻塞关闭）
-    try { void getCurrentWindow().onCloseRequested(async () => { try { const c = await getWebdavSyncConfig(); if (c.enabled && c.onShutdown) { void syncNow('shutdown') } } catch {} }) } catch {}
+
+    // 关闭前同步 - 改进：阻止关闭，隐藏窗口，后台同步完成后退出
+    try {
+      const window = getCurrentWindow()
+      window.onCloseRequested(async (event) => {
+        try {
+          const c = await getWebdavSyncConfig()
+          if (c.enabled && c.onShutdown) {
+            // 阻止立即关闭
+            event.preventDefault()
+
+            await syncLog('[shutdown] 关闭前同步已启用，窗口将隐藏至后台')
+            console.log('[WebDAV Sync] 关闭前同步开始，窗口隐藏')
+
+            // 隐藏窗口到后台
+            try {
+              await window.hide()
+              updateStatus('后台同步中，完成后将自动退出...')
+            } catch (e) {
+              console.warn('隐藏窗口失败:', e)
+            }
+
+            // 执行同步
+            const result = await syncNow('shutdown')
+
+            await syncLog('[shutdown] 同步完成，准备退出程序')
+            console.log('[WebDAV Sync] 同步完成，退出程序')
+
+            // 同步完成后真正退出
+            try {
+              // 短暂延迟确保日志写入完成
+              await new Promise(resolve => setTimeout(resolve, 500))
+              await window.destroy()
+            } catch (e) {
+              console.warn('退出程序失败:', e)
+              // 如果 destroy 失败，尝试 close
+              try {
+                await window.close()
+              } catch {}
+            }
+          }
+        } catch (e) {
+          console.error('关闭前同步出错:', e)
+          await syncLog('[shutdown-error] ' + (e?.message || e))
+          // 出错时也要退出，不能卡住
+          try {
+            await getCurrentWindow().destroy()
+          } catch {}
+        }
+      })
+    } catch (e) {
+      console.warn('注册关闭事件失败:', e)
+    }
   } catch {}
 }
 
@@ -731,6 +784,9 @@ export async function openWebdavSyncDialog(): Promise<void> {
           <button id="sync-close" class="about-close" title="关闭">×</button>
         </div>
         <div class="upl-desc">自动同步库文件到 WebDAV 服务器。首次上传需要计算哈希值，耗时较长。</div>
+        <div class="upl-desc" style="color: #ff9800; font-size: 12px; margin-top: -8px;">
+          ⚠️ "关闭前同步"：启用后，关闭程序时窗口会隐藏到后台完成同步，同步完成后自动退出。
+        </div>
         <form class="upl-body" id="sync-form">
           <div class="upl-grid">
             <div class="upl-section-title">基础配置</div>
