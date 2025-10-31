@@ -784,9 +784,6 @@ export async function openWebdavSyncDialog(): Promise<void> {
           <button id="sync-close" class="about-close" title="关闭">×</button>
         </div>
         <div class="upl-desc">自动同步库文件到 WebDAV 服务器。首次上传需要计算哈希值，耗时较长。</div>
-        <div class="upl-desc" style="color: #ff9800; font-size: 12px; margin-top: -8px;">
-          ⚠️ "关闭前同步"：启用后，关闭程序时窗口会隐藏到后台完成同步，同步完成后自动退出。
-        </div>
         <form class="upl-body" id="sync-form">
           <div class="upl-grid">
             <div class="upl-section-title">基础配置</div>
@@ -810,6 +807,9 @@ export async function openWebdavSyncDialog(): Promise<void> {
                 <input id="sync-onshutdown" type="checkbox"/>
                 <span class="trk"></span><span class="kn"></span>
               </label>
+              <div class="upl-hint" style="color: #ff9800; margin-top: 8px;">
+                ⚠️ 启用后，关闭程序时窗口会隐藏到后台完成同步，同步完成后自动退出
+              </div>
             </div>
             <label for="sync-timeout">超时(毫秒)</label>
             <div class="upl-field">
