@@ -66,6 +66,20 @@ jobs:
           npm install -g @tauri-apps/cli
           npx tauri android init || echo "Android project already initialized"
 
+      - name: 检查并修复 icon 路径
+        run: |
+          echo "=== Current directory ==="
+          pwd
+          echo "=== Listing src-tauri/icons ==="
+          ls -la src-tauri/icons/ || echo "src-tauri/icons not found"
+          echo "=== Checking icon.png ==="
+          if [ -f src-tauri/icons/icon.png ]; then
+            echo "✓ icon.png exists"
+          else
+            echo "✗ icon.png NOT found, build will fail"
+            exit 1
+          fi
+
       - name: 构建前端
         run: npm run build
 

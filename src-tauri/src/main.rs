@@ -3,9 +3,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{Manager, State};
+use tauri::State;
 #[cfg(not(target_os = "android"))]
-use tauri::Emitter;
+use tauri::{Manager, Emitter};
 // 全局共享：保存通过“打开方式/默认程序”传入且可能早于前端监听的文件路径
 #[derive(Default)]
 struct PendingOpenPath(std::sync::Mutex<Option<String>>);
