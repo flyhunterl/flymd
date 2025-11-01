@@ -1066,7 +1066,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
         </div>
         <div class="upl-desc">自动同步库文件到 WebDAV 服务器。首次上传需要计算哈希值，耗时较长。</div>
         <div class="upl-hint warn pad-1ch" style="margin-top: 8px; margin-bottom: 8px;">
-          ⚠️  同步功能仍在开发测试中，请务必备份数据。
+          ⚠️  同步功能上线不久，仍在测试。请务必备份数据。
         </div>
         <form class="upl-body" id="sync-form">
           <div class="upl-grid">
