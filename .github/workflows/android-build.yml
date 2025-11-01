@@ -61,24 +61,30 @@ jobs:
       - name: 安装依赖
         run: npm install
 
+      - name: 准备 icons（在 init 前备份）
+        run: |
+          echo "=== Backing up icons before tauri android init ==="
+          mkdir -p /tmp/flymd-icons
+          cp -r src-tauri/icons/* /tmp/flymd-icons/ || echo "No icons to backup"
+          ls -la /tmp/flymd-icons/
+
       - name: 初始化 Tauri Android 项目
         run: |
           npm install -g @tauri-apps/cli
           npx tauri android init || echo "Android project already initialized"
 
-      - name: 检查并修复 icon 路径
+      - name: 恢复 icons（init 后可能被清空）
         run: |
-          echo "=== Current directory ==="
-          pwd
-          echo "=== Listing src-tauri/icons ==="
-          ls -la src-tauri/icons/ || echo "src-tauri/icons not found"
-          echo "=== Checking icon.png ==="
-          if [ -f src-tauri/icons/icon.png ]; then
-            echo "✓ icon.png exists"
-          else
-            echo "✗ icon.png NOT found, build will fail"
+          echo "=== Restoring icons after tauri android init ==="
+          mkdir -p src-tauri/icons
+          cp -r /tmp/flymd-icons/* src-tauri/icons/
+          echo "=== Verifying icon.png ==="
+          ls -la src-tauri/icons/icon.png
+          if [ ! -f src-tauri/icons/icon.png ]; then
+            echo "ERROR: icon.png still missing after restore!"
             exit 1
           fi
+          echo "✓ icon.png restored successfully"
 
       - name: 构建前端
         run: npm run build
