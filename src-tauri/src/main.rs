@@ -10,13 +10,16 @@ use tauri::{Manager, Emitter};
 #[derive(Default)]
 struct PendingOpenPath(std::sync::Mutex<Option<String>>);
 use serde::{Deserialize, Serialize};
+#[cfg_attr(target_os = "android", allow(unused_imports))]
 use sha2::Digest;
+#[cfg_attr(target_os = "android", allow(unused_imports))]
 use chrono::{DateTime, Utc};
 use std::time::Duration;
 
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 struct UploadReq {
   access_key_id: String,
   secret_access_key: String,
@@ -50,6 +53,7 @@ struct UploadResp {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 struct PresignReq {
   access_key_id: String,
   secret_access_key: String,
