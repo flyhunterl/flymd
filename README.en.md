@@ -2,14 +2,14 @@
 
 [简体中文](README.md) | English
 
-[![Version](https://img.shields.io/badge/version-v0.1.1-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.1.2-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
 A fast, lightweight, and stable Markdown editor/previewer powered by Tauri.
 
 
-- Extensions & Plugins: manage built-ins and install community extensions (v0.1.1).
+- Extensions & Plugins: manage built-ins and install community extensions (v0.1.2).
 - WYSIWYG overlay: instant rendering while typing; toggle with `Ctrl+Shift+E`.
 - Solid Preview mode: toggle Edit/Preview with `Ctrl+E`.
 - Full Markdown stack: markdown-it, KaTeX (LaTeX), Mermaid, highlight.js.
@@ -88,6 +88,19 @@ See the main README for screenshots.
 - `Ctrl+B` Bold  •  `Ctrl+I` Italic  •  `Ctrl+K` Insert Link
 - `Esc` Close Preview / dialogs
 
+
+## Changelog (v0.1.2)
+
+- UI: Improved extension window and partial extension styles.
+- Sync: Added sync logic options with richer real-time log information.
+- Sync: Optimized scanning logic for faster performance.
+- Sync: Rewrote partial sync logic - when encountering locally deleted files, users are now asked whether to sync delete or download to restore.
+- Library: Added create/delete folder functionality.
+- Fix: Resolved issue where print only captured visible range instead of full document.
+
+## Changelog (v0.1.1)
+
+- New: Extension list hot update functionality.
 
 ## Changelog (v0.0.9)
 
