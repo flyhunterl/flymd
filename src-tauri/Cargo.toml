@@ -31,13 +31,13 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-aws-config = { version = "1", features = ["rt-tokio", "behavior-version-latest"] }
-aws-sdk-s3 = { version = "1", features = ["rt-tokio"] }
 futures-util = "0.3"
 
-# 回收站功能（仅桌面端支持，Android 不支持）
+# 桌面端专属依赖（Android 不支持或不需要）
 [target.'cfg(not(target_os = "android"))'.dependencies]
 trash = "3"
+aws-config = { version = "1", features = ["rt-tokio", "behavior-version-latest"] }
+aws-sdk-s3 = { version = "1", features = ["rt-tokio"] }
 
 [profile.release]
 panic = "abort"
