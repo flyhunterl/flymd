@@ -15,8 +15,8 @@ coverage/
 
 # Rust / Tauri
 src-tauri/target/
-src-tauri/icons/
 src-tauri/gen/
+# src-tauri/icons/ - 不再忽略，Android 构建需要
 
 # 可执行产物（冗余保护，通常被 target 覆盖）
 *.exe
