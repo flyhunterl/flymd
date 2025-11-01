@@ -23,6 +23,7 @@ import { open as openFileHandle, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { openUrl, openPath } from '@tauri-apps/plugin-opener'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { appLocalDataDir } from '@tauri-apps/api/path'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import fileTree from './fileTree'
 import { uploadImageToS3R2, type UploaderConfig } from './uploader/s3'
@@ -2827,11 +2828,23 @@ function showLibrary(show: boolean) {
 
 async function pickLibraryRoot(): Promise<string | null> {
   try {
+    // 移动端（Android）暂不支持原生目录选择，使用应用本地数据目录作为库
+    if (isMobilePlatform && typeof isMobilePlatform === 'function' && isMobilePlatform()) {
+      const base = await appLocalDataDir()
+      const sep = base.includes('\\') ? '\\' : '/'
+      const p = (base.replace(/[\\/]+$/, '')) + sep + 'flymd-library'
+      try { await mkdir(p as any, { recursive: true } as any) } catch {}
+      await setLibraryRoot(p)
+      try { const el = document.getElementById('lib-path'); if (el) el.textContent = p } catch {}
+      return p
+    }
+    // 桌面端：正常选择目录
     const sel = await open({ directory: true, multiple: false } as any)
     if (!sel) return null
     const p = normalizePath(sel)
     if (!p) return null
     await setLibraryRoot(p)
+    try { const el = document.getElementById('lib-path'); if (el) el.textContent = p } catch {}
     return p
   } catch (e) {
     showError('选择库目录失败', e)
@@ -4592,7 +4605,6 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
     }
   } catch {}
 }
-
 
 
 

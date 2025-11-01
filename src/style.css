@@ -32,6 +32,9 @@
 html, body, #app { height: 100%; }
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 
+/* 默认隐藏所见模式状态条，进入所见模式并标记 .show 时才显示 */
+.wysiwyg-status { display: none; }
+
 .titlebar {
   height: 32px;
   display: flex;

@@ -2,6 +2,12 @@
 
 /* ========== 响应式布局 ========== */
 @media (max-width: 768px) {
+  /* 顶部安全区：避免与系统状态栏图标重叠（Android/iOS） */
+  :root { --safe-top: env(safe-area-inset-top, 0px); }
+  body { padding-top: var(--safe-top); }
+  .titlebar { height: calc(32px + var(--safe-top)); padding-top: var(--safe-top); }
+  .container { height: calc(100% - (32px + var(--safe-top))); }
+
   /* 隐藏顶部菜单栏（移动端改用侧滑菜单） */
   .titlebar .menubar { display: none !important; }
 
@@ -217,7 +223,7 @@
 @media (max-width: 768px) {
   .mobile-hamburger {
     position: fixed;
-    top: 10px;
+    top: calc(10px + var(--safe-top));
     left: 10px;
     width: 36px; height: 36px;
     border-radius: 8px;

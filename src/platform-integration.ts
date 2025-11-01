@@ -46,8 +46,8 @@ function setupFABListeners(): void {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }))
         break
       case 'preview':
-        // 触发预览切换
-        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', ctrlKey: true }))
+        // 触发预览切换（直接点按钮，避免某些环境下合成键盘事件被忽略）
+        try { (document.getElementById('btn-toggle') as HTMLElement | null)?.click() } catch {}
         break
       case 'library':
         // 切换库侧栏（复用现有按钮逻辑，避免状态不同步）
