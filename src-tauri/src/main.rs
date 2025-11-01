@@ -292,7 +292,9 @@ async fn http_xmlrpc_post(req: XmlHttpReq) -> Result<String, String> {
   Ok(text)
 }
 
-fn main() {
+// 公共函数：创建并运行 Tauri 应用
+// 供桌面端 (main.rs) 和移动端 (lib.rs) 共同使用
+pub fn run_app() {
   tauri::Builder::default()
     .manage(PendingOpenPath::default())
     .plugin(tauri_plugin_dialog::init())
@@ -373,6 +375,13 @@ fn main() {
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+// 桌面端主入口
+// 移动端使用 lib.rs 的 mobile_entry_point
+#[cfg(not(mobile))]
+fn main() {
+  run_app();
 }
 
 #[derive(Debug, Serialize)]
