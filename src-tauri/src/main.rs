@@ -324,7 +324,10 @@ pub fn run_app() {
       android_persist_uri_permission,
       get_platform
     ])
-    .setup(|app| {
+    .setup(|_app| {
+      // Android 平台下 app 未使用，加下划线前缀避免警告
+      #[cfg(not(target_os = "android"))]
+      let app = _app;
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
       {
