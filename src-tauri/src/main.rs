@@ -695,12 +695,22 @@ async fn get_pending_open_path(state: State<'_, PendingOpenPath>) -> Result<Opti
 #[tauri::command]
 async fn move_to_trash(path: String) -> Result<(), String> {
   // 使用 trash crate 跨平台移动到回收站
-  tauri::async_runtime::spawn_blocking(move || {
-    trash::delete(path).map_err(|e| format!("move_to_trash error: {e}"))
-  })
-  .await
-  .map_err(|e| format!("join error: {e}"))??;
-  Ok(())
+  // Android 不支持回收站，直接删除
+  #[cfg(not(target_os = "android"))]
+  {
+    tauri::async_runtime::spawn_blocking(move || {
+      trash::delete(path).map_err(|e| format!("move_to_trash error: {e}"))
+    })
+    .await
+    .map_err(|e| format!("join error: {e}"))??;
+    Ok(())
+  }
+
+  #[cfg(target_os = "android")]
+  {
+    // Android 无回收站概念，直接调用 force_remove_path
+    force_remove_path(path).await
+  }
 }
 
 #[tauri::command]
