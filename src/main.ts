@@ -3014,6 +3014,9 @@ async function newFolderSafe(dir: string, name = '新建文件夹'): Promise<str
   }
   const full = dir + sep + n
   await mkdir(full, { recursive: true } as any)
+  // 创建一个占位文件，使文件夹在库侧栏中可见
+  const placeholder = full + sep + 'README.md'
+  await writeTextFile(placeholder, '# ' + n + '\n\n', {} as any)
   return full
 }async function renderDir(container: HTMLDivElement, dir: string) {
   container.innerHTML = ''

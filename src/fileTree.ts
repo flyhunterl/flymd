@@ -74,6 +74,9 @@ async function newFolderSafe(dir: string, hint = '新建文件夹'): Promise<str
   while (await exists(dir + s + n)) { n = `${hint} ${++i}` }
   const full = dir + s + n
   await mkdir(full, { recursive: true } as any)
+  // 创建一个占位文件，使文件夹在库侧栏中可见
+  const placeholder = full + s + 'README.md'
+  await writeTextFile(placeholder, '# ' + n + '\n\n', {} as any)
   return full
 }
 
