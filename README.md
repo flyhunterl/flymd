@@ -7,7 +7,7 @@
 
 [![Version](https://img.shields.io/badge/version-v0.1.2-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/flyhunterl/flymd)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
 ![lv_0_20251028184941](https://github.com/user-attachments/assets/3d6a5b6a-82e8-4d9d-9657-c9b66ef48f82)
 
@@ -286,6 +286,5 @@ flyMD 支持通过扩展插件来增强功能。你可以：
 
 
 <img width="300" height="300" alt="image" src="https://github.com/user-attachments/assets/4a716fd5-dc61-4a4f-b968-91626debe8d2" />
-
 
 
