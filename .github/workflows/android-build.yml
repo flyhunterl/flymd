@@ -1,7 +1,7 @@
 name: Android Build
 
 on:
-  # 手动触发构建
+  # 仅手动触发构建（禁用自动触发）
   workflow_dispatch:
     inputs:
       build_type:
@@ -12,15 +12,6 @@ on:
         options:
           - debug
           - release
-  # 也可以在 push 到 android 分支时自动触发
-  push:
-    branches:
-      - android
-    paths:
-      - 'src/**'
-      - 'src-tauri/**'
-      - 'package.json'
-      - '.github/workflows/android-build.yml'
 
 env:
   TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
