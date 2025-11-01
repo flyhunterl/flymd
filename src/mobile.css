@@ -2,7 +2,11 @@
 
 /* ========== 响应式布局 ========== */
 @media (max-width: 768px) {
+  /* 隐藏顶部菜单栏（移动端改用侧滑菜单） */
+  .titlebar .menubar { display: none !important; }
+
   /* 隐藏桌面端文件库侧边栏，改为抽屉式 */
+  /* 兼容旧选择器：如存在 fileTreePanel 则以抽屉方式展示 */
   #fileTreePanel {
     position: fixed !important;
     left: -85vw;
@@ -17,6 +21,12 @@
   #fileTreePanel.mobile-open {
     left: 0;
   }
+
+
+  /* 将 .library 作为抽屉左滑出；不挤压编辑/预览 */
+  .library { position: fixed !important; left: -85vw; top: 0; width: 85vw; max-width: 360px; height: 100vh; z-index: 9999; transition: left .25s ease; box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3); }
+  .container.with-library .editor, .container.with-library .preview { padding-left: 0 !important; }
+  .library:not(.hidden) { left: 0; }
 
   /* 编辑器全屏 */
   #editor {
@@ -60,9 +70,7 @@
 }
 
 @media (max-width: 768px) {
-  .fab-container {
-    display: block;
-  }
+  .fab-container { display: none !important; } /* 移动端不再使用 FAB */
 }
 
 .fab-main {
@@ -203,6 +211,30 @@
 .drawer-overlay.show {
   display: block;
   opacity: 1;
+}
+
+/* ========== 左侧侧滑菜单 ========== */
+@media (max-width: 768px) {
+  .mobile-hamburger {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: rgba(127,127,127,0.08);
+    display: flex; align-items: center; justify-content: center;
+    gap: 3px;
+    z-index: 10001;
+  }
+  .mobile-hamburger span { display: block; width: 18px; height: 2px; background: var(--fg); }
+  .side-menu-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 10000; display: none; opacity: 0; transition: opacity .2s ease; }
+  .side-menu-overlay.show { display: block; opacity: 1; }
+  .side-menu { position: fixed; top: 0; left: -72vw; height: 100vh; width: 72vw; max-width: 320px; background: var(--panel-bg); color: var(--fg); z-index: 10002; box-shadow: 2px 0 12px rgba(0,0,0,0.25); transition: left .25s ease; display: flex; flex-direction: column; padding-top: 8px; }
+  .side-menu.open { left: 0; }
+  .side-menu-header { font-weight: 600; padding: 12px 16px; border-bottom: 1px solid var(--border); opacity: .8; }
+  .side-item { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: transparent; color: var(--fg); border: none; text-align: left; font-size: 16px; }
+  .side-item:active { background: rgba(127,127,127,0.12); }
 }
 
 /* ========== 移动端顶部工具栏精简 ========== */

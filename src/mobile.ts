@@ -11,8 +11,8 @@ import { isMobile } from './platform'
 export function initMobileUI(): void {
   if (!isMobile()) return
 
-  // 创建 FAB
-  createFAB()
+  // 移动端改用左侧侧滑菜单（替换 FAB）
+  createSideMenu()
 
   // 创建抽屉遮罩层
   createDrawerOverlay()
@@ -22,6 +22,77 @@ export function initMobileUI(): void {
 
   // 禁用桌面端拖拽打开文件
   disableDragDrop()
+}
+
+// ========== 侧滑菜单（移动端） ==========
+function createSideMenu(): void {
+  // 菜单容器
+  const menu = document.createElement('nav')
+  menu.id = 'sideMenu'
+  menu.className = 'side-menu'
+  menu.setAttribute('aria-label', '移动端菜单')
+  menu.innerHTML = `
+    <div class="side-menu-header">菜单</div>
+    <button class="side-item" data-action="library">📚 <span>库</span></button>
+    <button class="side-item" data-action="edit">✏️ <span>编辑</span></button>
+    <button class="side-item" data-action="preview">👁️ <span>预览</span></button>
+    <button class="side-item" data-action="webdav">☁️ <span>WebDAV 同步</span></button>
+  `
+  document.body.appendChild(menu)
+
+  // 遮罩层
+  let overlay = document.getElementById('sideMenuOverlay') as HTMLDivElement | null
+  if (!overlay) {
+    overlay = document.createElement('div') as HTMLDivElement
+    overlay.id = 'sideMenuOverlay'
+    overlay.className = 'side-menu-overlay'
+    document.body.appendChild(overlay)
+  }
+
+  // 汉堡按钮（浮在左上角）
+  const btn = document.createElement('button')
+  btn.id = 'mobileHamburger'
+  btn.className = 'mobile-hamburger'
+  btn.setAttribute('aria-label', '打开菜单')
+  btn.innerHTML = '<span></span><span></span><span></span>'
+  document.body.appendChild(btn)
+
+  const open = () => { menu.classList.add('open'); overlay!.classList.add('show') }
+  const close = () => { menu.classList.remove('open'); overlay!.classList.remove('show') }
+
+  btn.addEventListener('click', () => {
+    if (menu.classList.contains('open')) close(); else open()
+  })
+  overlay.addEventListener('click', () => close())
+
+  // 菜单项点击 -> 触发动作并关闭菜单
+  menu.addEventListener('click', (e) => {
+    const t = (e.target as HTMLElement).closest('.side-item') as HTMLElement | null
+    if (!t) return
+    const action = t.dataset.action || ''
+    triggerFABAction(action)
+    close()
+  })
+
+  // 轻微滑动手势（从左边缘右滑打开）
+  try {
+    let startX = 0, startY = 0, tracking = false
+    window.addEventListener('touchstart', (ev) => {
+      const t = ev.touches?.[0]
+      if (!t) return
+      startX = t.clientX; startY = t.clientY
+      tracking = (startX < 20) // 左边缘 20px 内
+    }, { passive: true } as any)
+    window.addEventListener('touchmove', (ev) => {
+      if (!tracking) return
+      const t = ev.touches?.[0]; if (!t) return
+      const dx = t.clientX - startX; const dy = Math.abs(t.clientY - startY)
+      if (dx > 40 && dy < 30) { // 右滑且较直
+        open(); tracking = false
+      }
+    }, { passive: true } as any)
+    window.addEventListener('touchend', () => { tracking = false })
+  } catch {}
 }
 
 // 创建浮动操作按钮

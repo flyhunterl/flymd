@@ -4,7 +4,8 @@
 */
 
 import { isMobile, getPlatform, openFileDialog, saveFileDialog, readFile, writeFile, type FileRef, addRecentFile } from './platform'
-import { initMobileUI, openDrawer } from './mobile'
+import { initMobileUI } from './mobile'
+import { openWebdavSyncDialog } from './extensions/webdavSync'
 
 // 全局状态：当前打开的文件引用
 let currentFileRef: FileRef | null = null
@@ -46,8 +47,24 @@ function setupFABListeners(): void {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', ctrlKey: true }))
         break
       case 'library':
-        // 打开文件库抽屉
-        openDrawer()
+        // 切换库侧栏（复用现有按钮逻辑，避免状态不同步）
+        try { (document.getElementById('btn-library') as HTMLElement | null)?.click() } catch {}
+        break
+      case 'edit': {
+        // 显式进入编辑：若当前为预览，则触发一次切换；若处于所见模式，也关闭所见
+        try {
+          const container = document.querySelector('.container') as HTMLDivElement | null
+          const preview = document.getElementById('preview') as HTMLDivElement | null
+          const inWysiwyg = !!container?.classList.contains('wysiwyg')
+          const inPreview = !!preview && !preview.classList.contains('hidden') && !inWysiwyg
+          if (inPreview) { (document.getElementById('btn-toggle') as HTMLElement | null)?.click() }
+          if (inWysiwyg) { (document.getElementById('btn-wysiwyg') as HTMLElement | null)?.click() }
+        } catch {}
+        break
+      }
+      case 'webdav':
+        // 打开 WebDAV 同步设置
+        try { void openWebdavSyncDialog() } catch {}
         break
     }
   }) as EventListener)
