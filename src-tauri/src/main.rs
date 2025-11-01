@@ -301,7 +301,26 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
-    .invoke_handler(tauri::generate_handler![upload_to_s3, presign_put, move_to_trash, force_remove_path, read_text_file_any, write_text_file_any, get_pending_open_path, http_xmlrpc_post, check_update, download_file, run_installer])
+    .invoke_handler(tauri::generate_handler![
+      upload_to_s3,
+      presign_put,
+      move_to_trash,
+      force_remove_path,
+      read_text_file_any,
+      write_text_file_any,
+      get_pending_open_path,
+      http_xmlrpc_post,
+      check_update,
+      download_file,
+      run_installer,
+      // Android SAF 命令
+      android_pick_document,
+      android_create_document,
+      android_read_uri,
+      android_write_uri,
+      android_persist_uri_permission,
+      get_platform
+    ])
     .setup(|app| {
       // Windows "打开方式/默认程序" 传入的文件参数处理
       #[cfg(target_os = "windows")]
@@ -716,5 +735,110 @@ async fn run_installer(path: String) -> Result<(), String> {
   #[cfg(not(target_os = "windows"))]
   {
     Err("run_installer only supports Windows".into())
+  }
+}
+
+// ============ Android SAF 文件操作命令（移动端专用） ============
+// 这些命令在 Android 上通过 JNI 调用原生 SAF API
+// 桌面版返回错误提示
+
+#[tauri::command]
+async fn android_pick_document() -> Result<String, String> {
+  #[cfg(target_os = "android")]
+  {
+    // TODO: 实现 JNI 调用 Intent ACTION_OPEN_DOCUMENT
+    // 返回 content:// URI
+    Err("android_pick_document: JNI implementation pending".into())
+  }
+  #[cfg(not(target_os = "android"))]
+  {
+    Err("android_pick_document only available on Android".into())
+  }
+}
+
+#[tauri::command]
+async fn android_create_document(filename: String, mime_type: String) -> Result<String, String> {
+  #[cfg(target_os = "android")]
+  {
+    // TODO: 实现 JNI 调用 Intent ACTION_CREATE_DOCUMENT
+    // 返回 content:// URI
+    let _ = filename;
+    let _ = mime_type;
+    Err("android_create_document: JNI implementation pending".into())
+  }
+  #[cfg(not(target_os = "android"))]
+  {
+    Err("android_create_document only available on Android".into())
+  }
+}
+
+#[tauri::command]
+async fn android_read_uri(uri: String) -> Result<String, String> {
+  #[cfg(target_os = "android")]
+  {
+    // TODO: 实现 JNI 调用 ContentResolver.openInputStream
+    // 读取 URI 内容并返回文本
+    let _ = uri;
+    Err("android_read_uri: JNI implementation pending".into())
+  }
+  #[cfg(not(target_os = "android"))]
+  {
+    Err("android_read_uri only available on Android".into())
+  }
+}
+
+#[tauri::command]
+async fn android_write_uri(uri: String, content: String) -> Result<(), String> {
+  #[cfg(target_os = "android")]
+  {
+    // TODO: 实现 JNI 调用 ContentResolver.openOutputStream
+    // 写入内容到 URI
+    let _ = uri;
+    let _ = content;
+    Err("android_write_uri: JNI implementation pending".into())
+  }
+  #[cfg(not(target_os = "android"))]
+  {
+    Err("android_write_uri only available on Android".into())
+  }
+}
+
+#[tauri::command]
+async fn android_persist_uri_permission(uri: String) -> Result<(), String> {
+  #[cfg(target_os = "android")]
+  {
+    // TODO: 实现 JNI 调用 takePersistableUriPermission
+    // 持久化 URI 访问权限
+    let _ = uri;
+    Err("android_persist_uri_permission: JNI implementation pending".into())
+  }
+  #[cfg(not(target_os = "android"))]
+  {
+    Err("android_persist_uri_permission only available on Android".into())
+  }
+}
+
+#[tauri::command]
+async fn get_platform() -> Result<String, String> {
+  // 返回当前平台标识，前端用于条件分支
+  #[cfg(target_os = "android")]
+  {
+    Ok("android".into())
+  }
+  #[cfg(target_os = "windows")]
+  {
+    Ok("windows".into())
+  }
+  #[cfg(target_os = "linux")]
+  {
+    Ok("linux".into())
+  }
+  #[cfg(target_os = "macos")]
+  {
+    Ok("macos".into())
+  }
+  #[cfg(not(any(target_os = "android", target_os = "windows", target_os = "linux", target_os = "macos")))]
+  {
+    Ok("unknown".into())
   }
 }

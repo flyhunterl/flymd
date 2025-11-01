@@ -1,0 +1,248 @@
+/* 移动端 UI 适配样式 */
+
+/* ========== 响应式布局 ========== */
+@media (max-width: 768px) {
+  /* 隐藏桌面端文件库侧边栏，改为抽屉式 */
+  #fileTreePanel {
+    position: fixed !important;
+    left: -85vw;
+    top: 0;
+    width: 85vw;
+    height: 100vh;
+    z-index: 9999;
+    transition: left 0.3s ease;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+  }
+
+  #fileTreePanel.mobile-open {
+    left: 0;
+  }
+
+  /* 编辑器全屏 */
+  #editor {
+    width: 100vw !important;
+    height: calc(100vh - 48px) !important; /* 减去顶部工具栏 */
+    font-size: 16px !important; /* iOS 防止自动缩放 */
+  }
+
+  /* 预览区全屏 */
+  #preview {
+    width: 100vw !important;
+    height: calc(100vh - 48px) !important;
+  }
+
+  /* 顶部工具栏按钮加大（触摸友好） */
+  .toolbar button,
+  .toolbar select {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    padding: 8px !important;
+  }
+
+  /* 隐藏部分桌面端功能 */
+  .desktop-only {
+    display: none !important;
+  }
+
+  /* 文件库按钮（触发抽屉） */
+  #toggleFileTree {
+    display: block !important;
+  }
+}
+
+/* ========== 浮动操作按钮 (FAB) ========== */
+.fab-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+  display: none; /* 默认隐藏，移动端显示 */
+}
+
+@media (max-width: 768px) {
+  .fab-container {
+    display: block;
+  }
+}
+
+.fab-main {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fab-main:active {
+  transform: scale(0.95);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.fab-main.open {
+  transform: rotate(45deg);
+}
+
+/* FAB 子菜单 */
+.fab-menu {
+  position: absolute;
+  bottom: 70px;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s;
+  transform: translateY(20px);
+}
+
+.fab-menu.open {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateY(0);
+}
+
+.fab-item {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #555;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, background 0.2s;
+  position: relative;
+}
+
+.fab-item:active {
+  transform: scale(0.9);
+}
+
+.fab-item[data-action="new"] {
+  background: #4caf50;
+}
+
+.fab-item[data-action="open"] {
+  background: #2196f3;
+}
+
+.fab-item[data-action="save"] {
+  background: #ff9800;
+}
+
+.fab-item[data-action="preview"] {
+  background: #9c27b0;
+}
+
+.fab-item[data-action="library"] {
+  background: #607d8b;
+}
+
+/* FAB 标签提示 */
+.fab-item::before {
+  content: attr(data-label);
+  position: absolute;
+  right: 58px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.fab-item:hover::before {
+  opacity: 1;
+}
+
+/* ========== 虚拟键盘适配 ========== */
+/* 当虚拟键盘弹出时，调整编辑器高度 */
+@supports (height: 100dvh) {
+  @media (max-width: 768px) {
+    #editor {
+      height: calc(100dvh - 48px) !important;
+    }
+    #preview {
+      height: calc(100dvh - 48px) !important;
+    }
+  }
+}
+
+/* ========== 抽屉遮罩层 ========== */
+.drawer-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9998;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.drawer-overlay.show {
+  display: block;
+  opacity: 1;
+}
+
+/* ========== 移动端顶部工具栏精简 ========== */
+@media (max-width: 768px) {
+  .toolbar {
+    height: 48px !important;
+    padding: 4px 8px !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+  }
+
+  /* 工具栏按钮图标模式（隐藏文字） */
+  .toolbar button span.text {
+    display: none;
+  }
+
+  /* 溢出菜单（三点） */
+  .toolbar-overflow {
+    display: inline-block !important;
+  }
+}
+
+/* ========== 触摸滚动优化 ========== */
+@media (max-width: 768px) {
+  #editor,
+  #preview,
+  #fileTreePanel {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+}
+
+/* ========== 暗色模式适配 ========== */
+@media (prefers-color-scheme: dark) {
+  .fab-main {
+    background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+  }
+
+  .fab-item {
+    background: #2d3748;
+  }
+}
