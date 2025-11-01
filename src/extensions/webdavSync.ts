@@ -6,6 +6,7 @@ import { Store } from '@tauri-apps/plugin-store'
 import { readDir, stat, readFile, writeFile, mkdir, exists, open as openFileHandle, BaseDirectory, remove } from '@tauri-apps/plugin-fs'
 import { appLocalDataDir } from '@tauri-apps/api/path'
 import { openPath } from '@tauri-apps/plugin-opener'
+import { ask } from '@tauri-apps/plugin-dialog'
 
 // 更新状态栏显示
 function updateStatus(msg: string) {
@@ -665,6 +666,14 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           continue
         }
 
+        // **关键优化**：如果本地未变化，但远程变化是基于 mtime 判断的（不可靠）
+        // 那么我们应该信任本地副本，跳过下载，避免误判
+        // 原因：mtime 可能因时钟偏差、元数据更新等改变，但内容实际未变
+        if (!localChanged && remoteChanged && remoteChangeReason === 'mtime-diff') {
+          await syncLog(`[skip-download] ${k} - 本地未变化且远程仅 mtime 不同，跳过下载避免误判`)
+          continue
+        }
+
         // 记录详细判断信息
         if (localChanged || remoteChanged) {
           await syncLog(`[compare-detail] ${k} | local: ${localChanged ? 'changed' : 'unchanged'} | remote: ${remoteChanged ? 'changed(' + remoteChangeReason + ')' : 'unchanged'} | lastHash: ${lastHash.substring(0, 8)}... | localHash: ${localHash.substring(0, 8)}...`)
@@ -868,7 +877,16 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           await syncLog('[local-deleted] ' + act.rel + ' 本地文件已被删除，询问用户如何处理')
           try {
             const msg = `检测到文件被删除：${act.rel}\n\n此文件在上次同步后被本地删除。\n\n请选择：\n- 确定：同步删除远程文件\n- 取消：从远程恢复到本地`
-            if (confirm(msg)) {
+            let userChoice = false
+            try {
+              // 使用 Tauri dialog API（更可靠）
+              userChoice = await ask(msg, { title: '文件已删除', kind: 'warning' })
+            } catch {
+              // 降级到浏览器 confirm
+              userChoice = confirm(msg)
+            }
+
+            if (userChoice) {
               // 用户选择删除远程文件
               await syncLog('[local-deleted-action] ' + act.rel + ' 用户选择删除远程文件')
               await deleteRemoteFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
