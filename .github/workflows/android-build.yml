@@ -66,6 +66,60 @@ jobs:
           npm install -g @tauri-apps/cli
           npx tauri android init || echo "Android project already initialized"
 
+      - name: 注入 Android 沉浸式 MainActivity（隐藏状态栏/导航栏）
+        run: |
+          set -e
+          APP_PKG_PATH=src-tauri/gen/android/app/src/main/java/com/flymd
+          mkdir -p "$APP_PKG_PATH"
+          cat > "$APP_PKG_PATH/MainActivity.kt" << 'EOF'
+          package com.flymd
+
+          import android.os.Build
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import android.view.View
+          import android.view.WindowInsetsController
+          import android.view.WindowInsets
+          import android.view.WindowManager
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setImmersive()
+              }
+
+              override fun onWindowFocusChanged(hasFocus: Boolean) {
+                  super.onWindowFocusChanged(hasFocus)
+                  if (hasFocus) setImmersive()
+              }
+
+              private fun setImmersive() {
+                  val w = window
+                  if (Build.VERSION.SDK_INT >= 30) {
+                      val c = w.insetsController
+                      if (c != null) {
+                          c.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                          c.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                      }
+                  } else {
+                      @Suppress("DEPRECATION")
+                      val flags = (
+                          View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                          View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                          View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                          View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                          View.SYSTEM_UI_FLAG_FULLSCREEN or
+                          View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                      )
+                      @Suppress("DEPRECATION")
+                      w.decorView.systemUiVisibility = flags
+                      @Suppress("DEPRECATION")
+                      w.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                  }
+              }
+          }
+          EOF
+
       - name: 构建前端
         run: npm run build
 
