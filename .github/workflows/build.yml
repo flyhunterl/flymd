@@ -18,6 +18,12 @@ jobs:
           - platform: ubuntu-22.04
             os: Linux
             arch: x64
+          - platform: macos-14
+            os: macOS
+            arch: arm64
+          - platform: macos-13
+            os: macOS
+            arch: x64
 
     runs-on: ${{ matrix.platform }}
 
@@ -74,12 +80,24 @@ jobs:
 
       - name: Generate icons from flymd.png
         run: npx tauri icon ./flymd.png
+      - name: Build Tauri app (macOS)
+        if: startsWith(matrix.platform, 'macos-')
+        run: npm run tauri:build -- --bundles dmg
       - name: Build Tauri app (Windows)
         if: matrix.platform == 'windows-latest'
         run: npm run tauri:build -- --bundles nsis
       - name: Build Tauri app (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: npm run tauri:build -- --bundles deb appimage
+
+      - name: Zip .app for convenience (macOS optional)
+        if: startsWith(matrix.platform, 'macos-')
+        run: |
+          APP_DIR="src-tauri/target/release/bundle/macos/flymd.app"
+          OUT_DIR="src-tauri/target/release/bundle/macos"
+          if [ -d "$APP_DIR" ]; then
+            (cd "$OUT_DIR" && zip -qry flymd_${{ matrix.arch }}.app.zip flymd.app)
+          fi
 
       - name: Create portable zip (Windows)
         if: matrix.platform == 'windows-latest'
@@ -120,6 +138,16 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: warn
 
+      - name: Upload artifacts (macOS)
+        if: startsWith(matrix.platform, 'macos-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: flymd-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app.zip
+          if-no-files-found: warn
+
   # 可选：创建 Release
   create-release:
     needs: build
@@ -136,5 +164,7 @@ jobs:
             flymd-Windows-x64/**/*
             flymd-Windows-x64-portable/**/*
             flymd-Linux-x64/**/*
+            flymd-macOS-arm64/**/*
+            flymd-macOS-x64/**/*
           draft: true
           generate_release_notes: true
