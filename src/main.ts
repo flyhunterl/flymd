@@ -4445,13 +4445,25 @@ for (const it of items) {
   const name = document.createElement('div'); name.className = 'ext-name'
   const spanName = document.createElement('span'); spanName.textContent = String(it.name || it.id)
   name.appendChild(spanName)
-  if (it.author) { const a2 = document.createElement('span'); a2.textContent = '作者:' + (it.author || '') + ' '; name.appendChild(a2) }
-  if (it.homepage) {
-    const a = document.createElement('a'); a.href = it.homepage!; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = '主页'
-    a.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); try { void openInBrowser(it.homepage!) } catch {} })
-    name.appendChild(a)
+  const desc = document.createElement('div'); desc.className = 'ext-desc'
+  if (it.description) {
+    const descText = document.createElement('span'); descText.textContent = it.description
+    desc.appendChild(descText)
   }
-  const desc = document.createElement('div'); desc.className = 'ext-desc'; desc.textContent = it.description || ''
+  if (it.author || it.homepage) {
+    const spacing = document.createTextNode('  ')
+    desc.appendChild(spacing)
+    if (it.author) {
+      const authorSpan = document.createElement('span'); authorSpan.textContent = '作者:' + (it.author || '')
+      desc.appendChild(authorSpan)
+      if (it.homepage) { desc.appendChild(document.createTextNode(' ')) }
+    }
+    if (it.homepage) {
+      const a = document.createElement('a'); a.href = it.homepage!; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = '主页'
+      a.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); try { void openInBrowser(it.homepage!) } catch {} })
+      desc.appendChild(a)
+    }
+  }
   meta.appendChild(name); meta.appendChild(desc)
   const actions = document.createElement('div'); actions.className = 'ext-actions'
   const btnInstall = document.createElement('button'); btnInstall.className = 'btn primary'; btnInstall.textContent = '安装'

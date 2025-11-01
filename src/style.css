@@ -611,3 +611,10 @@ html, body, #app, .container, .preview { scrollbar-width: none; }
 /* WebKit/Chromium */
 html::-webkit-scrollbar, body::-webkit-scrollbar, #app::-webkit-scrollbar,
 .container::-webkit-scrollbar, .preview::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
+/* WebDAV 同步：标签左对齐、警告缩进与横排开关 */
+.upl-grid > label { justify-self: start; text-align: left; }
+.upl-hint.warn { color: #ff9800; }
+.upl-hint.pad-1ch { padding-left: 1ch; }
+.upl-grid .sync-toggles { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px 24px; flex-wrap: wrap; }
+.sync-toggles .item { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.sync-toggles .lbl { font-size: 12px; color: var(--muted); }

@@ -784,34 +784,12 @@ export async function openWebdavSyncDialog(): Promise<void> {
           <button id="sync-close" class="about-close" title="关闭">×</button>
         </div>
         <div class="upl-desc">自动同步库文件到 WebDAV 服务器。首次上传需要计算哈希值，耗时较长。</div>
+        <div class="upl-hint warn pad-1ch" style="margin-top: 8px; margin-bottom: 8px;">
+          ⚠️  同步功能仍在开发测试中，请务必备份数据。
+        </div>
         <form class="upl-body" id="sync-form">
           <div class="upl-grid">
-            <div class="upl-section-title">基础配置</div>
-            <label for="sync-enabled">启用同步</label>
-            <div class="upl-field">
-              <label class="switch">
-                <input id="sync-enabled" type="checkbox"/>
-                <span class="trk"></span><span class="kn"></span>
-              </label>
-            </div>
-            <label for="sync-onstartup">启动时同步</label>
-            <div class="upl-field">
-              <label class="switch">
-                <input id="sync-onstartup" type="checkbox"/>
-                <span class="trk"></span><span class="kn"></span>
-              </label>
-            </div>
-            <label for="sync-onshutdown">关闭前同步</label>
-            <div class="upl-field">
-              <label class="switch">
-                <input id="sync-onshutdown" type="checkbox"/>
-                <span class="trk"></span><span class="kn"></span>
-              </label>
-              <div class="upl-hint" style="color: #ff9800; margin-top: 8px;">
-                ⚠️ 启用后，关闭程序时窗口会隐藏到后台完成同步，同步完成后自动退出
-              </div>
-            </div>
-            <label for="sync-timeout">超时(毫秒)</label>
+            <div class="upl-section-title">基础配置</div>\n            <div class="sync-toggles">\n              <div class="item">\n                <span class="lbl">启用同步</span>\n                <label class="switch" for="sync-enabled">\n                  <input id="sync-enabled" type="checkbox"/>\n                  <span class="trk"></span><span class="kn"></span>\n                </label>\n              </div>\n              <div class="item">\n                <span class="lbl">启动时同步</span>\n                <label class="switch" for="sync-onstartup">\n                  <input id="sync-onstartup" type="checkbox"/>\n                  <span class="trk"></span><span class="kn"></span>\n                </label>\n              </div>\n              <div class="item">\n                <span class="lbl">关闭前同步</span>\n                <label class="switch" for="sync-onshutdown">\n                  <input id="sync-onshutdown" type="checkbox"/>\n                  <span class="trk"></span><span class="kn"></span>\n                </label>\n              </div>\n              <div class="upl-hint warn pad-1ch" style="white-space: nowrap;">\n                ⚠️ 启用后，关闭窗口会隐藏到后台继续同步，同步完成后自动退出\n              </div>\n            </div>\n<label for="sync-timeout">超时(毫秒)</label>
             <div class="upl-field">
               <input id="sync-timeout" type="number" min="1000" step="1000" placeholder="120000"/>
               <div class="upl-hint">建议 120000（2分钟），网络较慢时可适当增加</div>
@@ -926,3 +904,4 @@ async function ensureRemoteDir(baseUrl: string, auth: { username: string; passwo
     for (const p of parts) { cur += '/' + p; try { await mkcol(baseUrl, auth, cur) } catch {} }
   } catch {}
 }
+
