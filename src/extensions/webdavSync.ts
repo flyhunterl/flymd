@@ -379,13 +379,14 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
 async function listRemoteRecursively(baseUrl: string, auth: { username: string; password: string }, rootPath: string): Promise<Map<string, FileEntry>> {
   const map = new Map<string, FileEntry>()
   let dirCount = 0
+  let fileCount = 0
 
   async function walk(rel: string) {
     const full = rel ? rootPath.replace(/\/+$/,'') + '/' + rel.replace(/^\/+/, '') : rootPath
 
     dirCount++
-    if (dirCount % 5 === 0) {
-      updateStatus(`扫描远程… ${dirCount} 个目录`)
+    if (dirCount % 3 === 0 || fileCount % 20 === 0) {
+      updateStatus(`扫描远程… 已发现 ${fileCount} 个文件，${dirCount} 个目录`)
     }
 
     let __filesRes: any = { files: [] }
@@ -401,12 +402,13 @@ async function listRemoteRecursively(baseUrl: string, auth: { username: string; 
       if (f.isDir) {
         await walk(r)
       } else {
+        fileCount++
         map.set(r, { path: r, mtime: toEpochMs(f.mtime), size: 0, etag: f.etag })
       }
     }
   }
   await walk('')
-  updateStatus(`远程扫描完成，共 ${map.size} 个文件`)
+  updateStatus(`远程扫描完成，共 ${fileCount} 个文件，${dirCount} 个目录`)
   return map
 }
 
@@ -540,10 +542,20 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     updateStatus('正在连接 WebDAV 服务器…')
     await syncLog('[remote] 开始扫描远程文件' + (hasLocalChanges ? '（检测到本地有修改）' : '（距上次同步超过' + skipMinutes + '分钟）'))
 
+    // 2秒后更新提示（如果还在扫描中）
+    const connectionHintTimer = setTimeout(() => {
+      try {
+        updateStatus('连接成功，正在扫描远程文件结构…')
+      } catch {}
+    }, 2000)
+
     // 扫描远程文件
     const remoteIdx = await listRemoteRecursively(cfg.baseUrl, auth, cfg.rootPath)
 
-    const plan: { type: 'upload' | 'download' | 'delete' | 'conflict' | 'move-remote'; rel: string; oldRel?: string; reason?: string }[] = []
+    // 清除定时器
+    clearTimeout(connectionHintTimer)
+
+    const plan: { type: 'upload' | 'download' | 'delete' | 'conflict' | 'move-remote' | 'local-deleted'; rel: string; oldRel?: string; reason?: string }[] = []
 
     // 添加对比阶段提示
     updateStatus('正在对比本地和远程文件…')
@@ -609,10 +621,10 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       // 情况2：本地无，远程有
       else if (!local && remote) {
         if (last) {
-          // 上次同步过，现在本地没有了
-          // 安全策略：不删除远程，而是重新下载到本地（恢复文件）
-          await syncLog('[detect] ' + k + ' 本地文件缺失，将从远程下载恢复')
-          plan.push({ type: 'download', rel: k, reason: 'local-missing' })
+          // 上次同步过，现在本地没有了 → 用户可能删除了本地文件
+          // 询问用户是否同步删除远程文件
+          await syncLog('[detect] ' + k + ' 本地文件已被删除，将询问用户如何处理')
+          plan.push({ type: 'local-deleted', rel: k, reason: 'local-deleted' } as any)
         } else {
           // 上次没同步过 → 远程新增，下载
           plan.push({ type: 'download', rel: k, reason: 'remote-new' })
@@ -850,6 +862,45 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
             syncTime: Date.now(),
             remoteMtime: local?.mtime,  // 上传后远端mtime应与本地相同
             remoteEtag: undefined       // 上传后暂时没有etag
+          }
+        } else if (act.type === 'local-deleted') {
+          // 处理本地文件被删除的情况：询问用户
+          await syncLog('[local-deleted] ' + act.rel + ' 本地文件已被删除，询问用户如何处理')
+          try {
+            const msg = `检测到文件被删除：${act.rel}\n\n此文件在上次同步后被本地删除。\n\n请选择：\n- 确定：同步删除远程文件\n- 取消：从远程恢复到本地`
+            if (confirm(msg)) {
+              // 用户选择删除远程文件
+              await syncLog('[local-deleted-action] ' + act.rel + ' 用户选择删除远程文件')
+              await deleteRemoteFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
+              del++
+              await syncLog('[ok] delete-remote ' + act.rel)
+              // 从元数据中移除
+              delete newMeta.files[act.rel]
+            } else {
+              // 用户选择从远程恢复
+              await syncLog('[local-deleted-action] ' + act.rel + ' 用户选择从远程恢复')
+              const data = await downloadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
+              const hash = await calculateFileHash(data)
+              const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
+              const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
+              if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
+              await writeFile(full as any, data as any)
+              down++
+              await syncLog('[ok] recover ' + act.rel)
+              // 记录到元数据
+              const meta = await stat(full)
+              const remote = remoteIdx.get(act.rel)
+              newMeta.files[act.rel] = {
+                hash,
+                mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs),
+                size: Number((meta as any)?.size || 0),
+                syncTime: Date.now(),
+                remoteMtime: remote?.mtime,
+                remoteEtag: remote?.etag
+              }
+            }
+          } catch (e) {
+            await syncLog('[local-deleted-error] ' + act.rel + ' 处理失败: ' + (e?.message || e))
           }
         } else if (act.type === 'delete') {
           // 不再自动删除远程文件，只记录警告
