@@ -1,7 +1,4 @@
-# 飞速MarkDown【flyMD】
-
-
-> 多平台支持  专注写作 极致性能 即开即用 所见即所得
+# 飞速MarkDown
 
 [简体中文](README.md) | [English](README.en.md)
 
