@@ -7,6 +7,7 @@
 */
 
 import './style.css'
+import './mobile.css'  // 移动端样式
 // KaTeX 样式改为按需动态加载（首次检测到公式时再加载）
 
 // markdown-it 和 DOMPurify 改为按需动态 import，类型仅在编译期引用
@@ -30,6 +31,8 @@ import { decorateCodeBlocks } from './decorate'
 import pkg from '../package.json'
 import { htmlToMarkdown } from './html2md'
 import { initWebdavSync, openWebdavSyncDialog, getWebdavSyncConfig, syncNow as webdavSyncNow } from './extensions/webdavSync'
+// 平台适配层（Android 支持）
+import { initPlatformIntegration, mobileSaveFile, isMobilePlatform } from './platform-integration'
 // 应用版本号（用于窗口标题/关于弹窗）
 const APP_VERSION: string = (pkg as any)?.version ?? '0.0.0'
 
@@ -514,6 +517,9 @@ app.innerHTML = `
   </div>
 `
 try { logInfo('打点:DOM就绪') } catch {}
+
+// 初始化平台适配（Android 支持）
+initPlatformIntegration().catch((e) => console.error('[Platform] Initialization failed:', e))
 
 const editor = document.getElementById('editor') as HTMLTextAreaElement
 const preview = document.getElementById('preview') as HTMLDivElement
