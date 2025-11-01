@@ -4,6 +4,7 @@
 */
 
 import { isMobile, getPlatform, openFileDialog, saveFileDialog, readFile, writeFile, type FileRef, addRecentFile } from './platform'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { initMobileUI } from './mobile'
 import { openWebdavSyncDialog } from './extensions/webdavSync'
 
@@ -17,6 +18,8 @@ export async function initPlatformIntegration(): Promise<void> {
     initMobileUI()
     setupFABListeners()
     console.log('[Platform] Mobile UI initialized')
+    // 尝试进入全屏（移动端沉浸式体验）。注意：不能完全隐藏系统状态栏/导航栏，需后续在原生层开启沉浸模式。
+    try { await getCurrentWindow().setFullscreen(true) } catch {}
   }
 
   const platform = await getPlatform()
