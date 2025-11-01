@@ -3,7 +3,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{Manager, Emitter, State};
+use tauri::{Manager, State};
+#[cfg(not(target_os = "android"))]
+use tauri::Emitter;
 // 全局共享：保存通过“打开方式/默认程序”传入且可能早于前端监听的文件路径
 #[derive(Default)]
 struct PendingOpenPath(std::sync::Mutex<Option<String>>);
@@ -302,7 +304,6 @@ pub fn run_app() {
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_http::init())
-    .plugin(tauri_plugin_window_state::Builder::default().build())
     .invoke_handler(tauri::generate_handler![
       upload_to_s3,
       presign_put,
@@ -354,19 +355,25 @@ pub fn run_app() {
           }
         }
       }
-      // 其它初始化逻辑
+      // 其它初始化逻辑（仅桌面端，移动端无窗口概念）
+      #[cfg(not(target_os = "android"))]
       if let Some(win) = app.get_webview_window("main") {
         #[cfg(target_os = "windows")]
         {
           let win_clone = win.clone();
           std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(120));
-            let _ = win_clone.show();
-            let _ = win_clone.set_focus();
+            #[cfg(not(target_os = "android"))]
+            {
+              use tauri::window::WindowExt;
+              let _ = win_clone.show();
+              let _ = win_clone.set_focus();
+            }
           });
         }
         #[cfg(not(target_os = "windows"))]
         {
+          use tauri::window::WindowExt;
           let _ = win.show();
           let _ = win.set_focus();
         }
@@ -731,7 +738,7 @@ async fn force_remove_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn run_installer(path: String) -> Result<(), String> {
+async fn run_installer(_path: String) -> Result<(), String> {
   #[cfg(target_os = "windows")]
   {
     use std::process::Command;
@@ -742,7 +749,7 @@ async fn run_installer(path: String) -> Result<(), String> {
         "-Command",
         "Start-Process",
         "-FilePath",
-        &path,
+        &_path,
         "-Verb",
         "runas",
       ])
