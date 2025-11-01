@@ -71,7 +71,7 @@ jobs:
 
       - name: 构建 Android APK (Debug)
         if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '' }}
-        run: npx tauri android build --debug --apk
+        run: npx tauri android build --debug
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
@@ -79,7 +79,7 @@ jobs:
 
       - name: 构建 Android APK (Release)
         if: ${{ github.event.inputs.build_type == 'release' }}
-        run: npx tauri android build --release --apk
+        run: npx tauri android build --release
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
