@@ -34,6 +34,7 @@ function createSideMenu(): void {
   menu.innerHTML = `
     <div class="side-menu-header">菜单</div>
     <button class="side-item" data-action="library">📚 <span>库</span></button>
+    <button class="side-item" data-action="save">💾 <span>保存</span></button>
     <button class="side-item" data-action="edit">✏️ <span>编辑</span></button>
     <button class="side-item" data-action="preview">👁️ <span>预览</span></button>
     <button class="side-item" data-action="webdav">☁️ <span>WebDAV 同步</span></button>

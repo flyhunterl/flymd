@@ -2848,24 +2848,21 @@ function showLibrary(show: boolean) {
 
 async function pickLibraryRoot(): Promise<string | null> {
   try {
-    // 移动端（Android）暂不支持原生目录选择，使用应用本地数据目录作为库
-    if (isMobilePlatform && typeof isMobilePlatform === 'function' && isMobilePlatform()) {
+    // 统一使用对话框选择目录（Android 上将尝试 SAF 目录）；失败则回退到应用数据目录
+    let picked: string | null = null
+    try {
+      const sel = await open({ directory: true, multiple: false } as any)
+      if (sel && typeof sel === 'string') picked = normalizePath(sel)
+    } catch {}
+    if (!picked) {
       const base = await appLocalDataDir()
       const sep = base.includes('\\') ? '\\' : '/'
-      const p = (base.replace(/[\\/]+$/, '')) + sep + 'flymd-library'
-      try { await mkdir(p as any, { recursive: true } as any) } catch {}
-      await setLibraryRoot(p)
-      try { const el = document.getElementById('lib-path'); if (el) el.textContent = p } catch {}
-      return p
+      picked = (base.replace(/[\\/]+$/, '')) + sep + 'flymd-library'
+      try { await mkdir(picked as any, { recursive: true } as any) } catch {}
     }
-    // 桌面端：正常选择目录
-    const sel = await open({ directory: true, multiple: false } as any)
-    if (!sel) return null
-    const p = normalizePath(sel)
-    if (!p) return null
-    await setLibraryRoot(p)
-    try { const el = document.getElementById('lib-path'); if (el) el.textContent = p } catch {}
-    return p
+    await setLibraryRoot(picked)
+    try { const el = document.getElementById('lib-path'); if (el) el.textContent = picked } catch {}
+    return picked
   } catch (e) {
     showError('选择库目录失败', e)
     return null
@@ -3364,7 +3361,22 @@ function bindEvents() {
     showLibrary(true)
     let root = await getLibraryRoot()
     if (!root) root = await pickLibraryRoot()
-    const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() }
+    // Android SAF 目录暂不直接浏览：提示并跳过文件树初始化
+    try {
+      const isSaf = !!(root && /^content:\/\//i.test(root))
+      if (isSaf && isMobilePlatform && typeof isMobilePlatform === 'function' && isMobilePlatform()) {
+        const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null
+        if (treeEl) treeEl.innerHTML = '<div style="padding:12px;color:var(--muted);">当前版本暂不支持直接浏览 SAF 目录（content://）。已记录为库路径，用于同步/后续版本。可先使用应用数据目录或 WebDAV。</div>'
+      } else {
+        const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null
+        if (treeEl && !fileTreeReady) {
+          await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } })
+          fileTreeReady = true
+        } else if (treeEl) {
+          await fileTree.refresh()
+        }
+      }
+    } catch {}
     // 应用持久化的排序偏好
     try { const s = await getLibrarySort(); fileTree.setSort(s); await fileTree.refresh() } catch {}
   }))
@@ -3711,7 +3723,23 @@ function bindEvents() {
   try {
     const chooseBtn = document.getElementById('lib-choose') as HTMLButtonElement | null
     const refreshBtn = document.getElementById('lib-refresh') as HTMLButtonElement | null
-    if (chooseBtn) chooseBtn.addEventListener('click', guard(async () => { await pickLibraryRoot(); const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } try { const s = await getLibrarySort(); fileTree.setSort(s); await fileTree.refresh() } catch {} }))
+    if (chooseBtn) chooseBtn.addEventListener('click', guard(async () => {
+      const root = await pickLibraryRoot()
+      const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null
+      if (!treeEl) return
+      const isSaf = !!(root && /^content:\/\//i.test(root))
+      if (isSaf && isMobilePlatform && typeof isMobilePlatform === 'function' && isMobilePlatform()) {
+        treeEl.innerHTML = '<div style="padding:12px;color:var(--muted);">当前版本暂不支持直接浏览 SAF 目录（content://）。已记录为库路径，用于同步/后续版本。可先使用应用数据目录或 WebDAV。</div>'
+        return
+      }
+      if (!fileTreeReady) {
+        await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } })
+        fileTreeReady = true
+      } else {
+        await fileTree.refresh()
+      }
+      try { const s = await getLibrarySort(); fileTree.setSort(s); await fileTree.refresh() } catch {}
+    }))
     if (refreshBtn) refreshBtn.addEventListener('click', guard(async () => { const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } try { const s = await getLibrarySort(); fileTree.setSort(s); await fileTree.refresh() } catch {} }))
   } catch {}
 
@@ -4625,9 +4653,6 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
     }
   } catch {}
 }
-
-
-
 
 
 
