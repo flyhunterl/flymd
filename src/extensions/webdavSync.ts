@@ -9,11 +9,73 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import { ask } from '@tauri-apps/plugin-dialog'
 
 // 更新状态栏显示
+// 实时日志面板：固定在底部，滚动追加
+function ensureLiveLog(): HTMLDivElement | null {
+  try {
+    let host = document.getElementById('sync-live-log') as HTMLDivElement | null
+    if (!host) {
+      host = document.createElement('div')
+      host.id = 'sync-live-log'
+      host.style.position = 'fixed'
+      host.style.left = '0'
+      host.style.right = '0'
+      host.style.bottom = '32px' // 状态条上方
+      host.style.maxHeight = '40vh'
+      host.style.overflow = 'auto'
+      host.style.background = 'rgba(0,0,0,0.6)'
+      host.style.color = '#fff'
+      host.style.fontSize = '12px'
+      host.style.lineHeight = '1.4'
+      host.style.padding = '8px 10px'
+      host.style.zIndex = '9999'
+      host.style.backdropFilter = 'blur(4px)'
+      host.style.borderTop = '1px solid rgba(255,255,255,0.15)'
+      host.style.display = 'none'
+      const close = document.createElement('button')
+      close.textContent = '×'
+      close.title = '关闭'
+      close.style.position = 'absolute'
+      close.style.top = '4px'
+      close.style.right = '8px'
+      close.style.border = '1px solid rgba(255,255,255,0.3)'
+      close.style.background = 'transparent'
+      close.style.color = '#fff'
+      close.style.borderRadius = '6px'
+      close.style.cursor = 'pointer'
+      close.addEventListener('click', () => { try { host!.style.display = 'none' } catch {} })
+      host.appendChild(close)
+      const list = document.createElement('div'); list.id = 'sync-live-list'; list.style.paddingRight = '24px'
+      host.appendChild(list)
+      document.body.appendChild(host)
+    }
+    return host
+  } catch { return null }
+}
+
+function liveLog(msg: string) {
+  try {
+    const host = ensureLiveLog()
+    if (!host) return
+    const list = host.querySelector('#sync-live-list') as HTMLDivElement | null
+    if (!list) return
+    const ln = document.createElement('div')
+    const ts = new Date().toLocaleTimeString()
+    ln.textContent = `[${ts}] ${msg}`
+    list.appendChild(ln)
+    // 限制最多 200 行
+    const kids = list.children
+    if (kids.length > 200) list.removeChild(kids[0])
+    host.style.display = 'block'
+    host.scrollTop = host.scrollHeight
+  } catch {}
+}
+
 function updateStatus(msg: string) {
   try {
     const el = document.getElementById('status')
     if (el) el.textContent = msg
   } catch {}
+  try { liveLog(msg) } catch {}
 }
 
 // 清空状态栏
@@ -1207,4 +1269,3 @@ async function ensureRemoteDir(baseUrl: string, auth: { username: string; passwo
     for (const p of parts) { cur += '/' + p; try { await mkcol(baseUrl, auth, cur) } catch {} }
   } catch {}
 }
-

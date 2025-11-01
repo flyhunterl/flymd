@@ -1100,6 +1100,21 @@ const containerEl = document.querySelector('.container') as HTMLDivElement
     <div class="lib-tree" id="lib-tree"></div>
   `
   containerEl.appendChild(library)
+  // 点击遮罩关闭库（移动端）
+  try {
+    const ov = document.getElementById('drawerOverlay') as HTMLDivElement | null
+    if (ov) ov.addEventListener('click', () => { try { showLibrary(false) } catch {} })
+  } catch {}
+  // 移动端：为库侧栏添加左滑关闭与点击遮罩关闭
+  try {
+    let startX = 0, startY = 0, moved = false
+    const onStart = (ev: TouchEvent) => { const t = ev.touches?.[0]; if (!t) return; startX = t.clientX; startY = t.clientY; moved = false }
+    const onMove = (ev: TouchEvent) => { const t = ev.touches?.[0]; if (!t) return; const dx = t.clientX - startX; const dy = Math.abs(t.clientY - startY); if (dx < -40 && dy < 30) { moved = true } }
+    const onEnd = () => { if (moved) { try { showLibrary(false) } catch {} } }
+    library.addEventListener('touchstart', onStart, { passive: true } as any)
+    library.addEventListener('touchmove', onMove, { passive: true } as any)
+    library.addEventListener('touchend', onEnd, { passive: true } as any)
+  } catch {}
   try {
     const elPath = library.querySelector('#lib-path') as HTMLDivElement | null
     const elChoose = library.querySelector('#lib-choose') as HTMLButtonElement | null
@@ -2822,8 +2837,13 @@ function showLibrary(show: boolean) {
   const lib = document.getElementById('library') as HTMLDivElement | null
   const container = document.querySelector('.container') as HTMLDivElement | null
   if (!lib || !container) return
-  if (show) { lib.classList.remove('hidden'); container.classList.add('with-library') }
-  else { lib.classList.add('hidden'); container.classList.remove('with-library') }
+  if (show) {
+    lib.classList.remove('hidden'); container.classList.add('with-library')
+    try { const ov = document.getElementById('drawerOverlay'); if (ov) ov.classList.add('show') } catch {}
+  } else {
+    lib.classList.add('hidden'); container.classList.remove('with-library')
+    try { const ov = document.getElementById('drawerOverlay'); if (ov) ov.classList.remove('show') } catch {}
+  }
 }
 
 async function pickLibraryRoot(): Promise<string | null> {
@@ -4605,9 +4625,6 @@ async function loadAndActivateEnabledPlugins(): Promise<void> {
     }
   } catch {}
 }
-
-
-
 
 
 
