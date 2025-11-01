@@ -18,7 +18,7 @@
       "homepage": "https://github.com/flyhunterl/flymd",
       "name": "字数统计",
       "description": "显示当前文档的字符数",
-      "author": "flyMD",
+      "author": "飞速MarkDown",
       "id": "wordcount",
       "install": {
         "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/wordcount/manifest.json",
