@@ -340,6 +340,7 @@ pub fn run_app() {
       check_update,
       download_file,
       run_installer,
+      android_set_immersive,
       // Android SAF 命令
       android_pick_document,
       android_create_document,
@@ -893,5 +894,43 @@ async fn get_platform() -> Result<String, String> {
   #[cfg(not(any(target_os = "android", target_os = "windows", target_os = "linux", target_os = "macos")))]
   {
     Ok("unknown".into())
+  }
+}
+#[tauri::command]
+#[allow(unused_variables)]
+async fn android_set_immersive() -> Result<(), String> {
+  #[cfg(target_os = "android")]
+  {
+    use jni::objects::JValue;
+    use jni::JNIEnv;
+    use tauri::mobile::android::activity;
+
+    let act = activity::current().ok_or_else(|| "No current Android activity".to_string())?;
+    act.run_on_ui_thread(move |env: JNIEnv| {
+      if let Ok(window_val) = env.call_method(act.activity(), "getWindow", "()Landroid/view/Window;", &[]) {
+        if let Ok(window_obj) = window_val.l() {
+          // API 30+: 尝试 WindowInsetsController
+          if let Ok(ctrl_val) = env.call_method(window_obj, "getInsetsController", "()Landroid/view/WindowInsetsController;", &[]) {
+            if let Ok(ctrl) = ctrl_val.l() {
+              let _ = env.call_method(ctrl, "hide", "(I)V", &[JValue::Int(0x00000004 | 0x00000002)]); // statusBars | navigationBars
+              let _ = env.call_method(ctrl, "setSystemBarsBehavior", "(I)V", &[JValue::Int(2)]); // BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+              return;
+            }
+          }
+          // 回退：SYSTEM_UI_FLAG_IMMERSIVE_STICKY 等旧标记
+          if let Ok(decor_val) = env.call_method(window_obj, "getDecorView", "()Landroid/view/View;", &[]) {
+            if let Ok(view) = decor_val.l() {
+              let flags = 0x00001000 | 0x00000200 | 0x00000400 | 0x00000100 | 0x00002000; // 布局+隐藏导航+全屏+沉浸
+              let _ = env.call_method(view, "setSystemUiVisibility", "(I)V", &[JValue::Int(flags)]);
+            }
+          }
+        }
+      }
+    });
+    Ok(())
+  }
+  #[cfg(not(target_os = "android"))]
+  {
+    Err("android_set_immersive only available on Android".into())
   }
 }
