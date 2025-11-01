@@ -159,6 +159,7 @@ export type WebdavSyncConfig = {
   rootPath: string
   clockSkewMs?: number
   conflictStrategy?: 'ask' | 'newest' | 'last-wins'  // 冲突策略
+  skipRemoteScanMinutes?: number  // 跳过远程扫描的时间间隔（分钟）
 }
 
 let _store: Store | null = null
@@ -184,6 +185,7 @@ export async function getWebdavSyncConfig(): Promise<WebdavSyncConfig> {
     rootPath: String(raw?.rootPath || '/flymd'),
     clockSkewMs: Number(raw?.clockSkewMs) || 0,
     conflictStrategy: raw?.conflictStrategy || 'newest',  // 默认newest
+    skipRemoteScanMinutes: Number(raw?.skipRemoteScanMinutes) >= 0 ? Number(raw?.skipRemoteScanMinutes) : 5,  // 默认5分钟
   }
   return cfg
 }
@@ -502,9 +504,41 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     updateStatus('正在扫描本地文件…')
     const localIdx = await scanLocal(localRoot, lastMeta)  // 传入 lastMeta 用于哈希缓存
 
+    // 优化：检查本地是否有修改
+    let hasLocalChanges = false
+    for (const [path, local] of localIdx.entries()) {
+      const last = lastMeta.files[path]
+      if (!last || last.hash !== local.hash) {
+        hasLocalChanges = true
+        break
+      }
+    }
+
+    // 检查是否有本地新增或删除的文件
+    const localPaths = new Set(localIdx.keys())
+    const lastPaths = new Set(Object.keys(lastMeta.files))
+    for (const path of lastPaths) {
+      if (!localPaths.has(path)) {
+        hasLocalChanges = true
+        break
+      }
+    }
+
+    // 智能跳过远程扫描
+    const timeSinceLastSync = Date.now() - (lastMeta.lastSyncTime || 0)
+    const skipMinutes = cfg.skipRemoteScanMinutes !== undefined ? cfg.skipRemoteScanMinutes : 5
+    const recentlyScanned = timeSinceLastSync < skipMinutes * 60 * 1000
+
+    if (!hasLocalChanges && recentlyScanned && skipMinutes > 0) {
+      await syncLog('[skip-remote] 本地无修改且最近刚同步过(' + Math.floor(timeSinceLastSync / 1000) + '秒前)，跳过远程扫描')
+      updateStatus('本地无修改，跳过同步')
+      clearStatus(2000)
+      return { uploaded: 0, downloaded: 0, skipped: true }
+    }
+
     // 添加连接服务器提示
     updateStatus('正在连接 WebDAV 服务器…')
-    await syncLog('[remote] 开始扫描远程文件')
+    await syncLog('[remote] 开始扫描远程文件' + (hasLocalChanges ? '（检测到本地有修改）' : '（距上次同步超过' + skipMinutes + '分钟）'))
 
     // 扫描远程文件
     const remoteIdx = await listRemoteRecursively(cfg.baseUrl, auth, cfg.rootPath)
@@ -983,6 +1017,12 @@ export async function openWebdavSyncDialog(): Promise<void> {
               <div class="upl-hint">当本地和远程文件都被修改时的处理策略</div>
             </div>
 
+            <label for="sync-skip-minutes">智能跳过远程扫描（分钟）</label>
+            <div class="upl-field">
+              <input id="sync-skip-minutes" type="number" min="0" step="1" placeholder="5"/>
+              <div class="upl-hint">若本地无修改且距上次同步未超过此时间，将跳过远程扫描（设为0则每次都扫描）</div>
+            </div>
+
             <div class="upl-section-title">WebDAV 服务器</div>
             <label for="sync-baseurl">Base URL</label>
             <div class="upl-field">
@@ -1029,6 +1069,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
   const elOnShutdown = overlay.querySelector('#sync-onshutdown') as HTMLInputElement
   const elTimeout = overlay.querySelector('#sync-timeout') as HTMLInputElement
   const elConflictStrategy = overlay.querySelector('#sync-conflict-strategy') as HTMLSelectElement
+  const elSkipMinutes = overlay.querySelector('#sync-skip-minutes') as HTMLInputElement
   const elBase = overlay.querySelector('#sync-baseurl') as HTMLInputElement
   const elRoot = overlay.querySelector('#sync-root') as HTMLInputElement
   const elUser = overlay.querySelector('#sync-user') as HTMLInputElement
@@ -1040,6 +1081,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
   elOnShutdown.checked = !!cfg.onShutdown
   elTimeout.value = String(cfg.timeoutMs || 120000)
   elConflictStrategy.value = cfg.conflictStrategy || 'newest'
+  elSkipMinutes.value = String(cfg.skipRemoteScanMinutes !== undefined ? cfg.skipRemoteScanMinutes : 5)
   elBase.value = cfg.baseUrl || ''
   elRoot.value = cfg.rootPath || '/flymd'
   elUser.value = cfg.username || ''
@@ -1054,6 +1096,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
         onShutdown: elOnShutdown.checked,
         timeoutMs: Math.max(1000, Number(elTimeout.value) || 120000),
         conflictStrategy: elConflictStrategy.value as 'ask' | 'newest' | 'last-wins',
+        skipRemoteScanMinutes: Math.max(0, Number(elSkipMinutes.value) || 5),
         baseUrl: elBase.value.trim(),
         rootPath: elRoot.value.trim() || '/flymd',
         username: elUser.value,
