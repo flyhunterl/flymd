@@ -553,7 +553,8 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     for (const k of allKeys) {
       compareCount++
       if (compareCount % 10 === 0) {
-        updateStatus(`正在对比变化… ${compareCount}/${totalCompare}`)
+        const shortName = k.length > 30 ? '...' + k.substring(k.length - 27) : k
+        updateStatus(`正在对比… ${shortName} (${compareCount}/${totalCompare})`)
       }
 
       const local = localIdx.get(k)
@@ -590,15 +591,25 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
 
         // 使用 ETag 或 mtime 判断远程是否变化（避免下载）
         let remoteChanged = false
+        let remoteChangeReason = ''
         if (last?.remoteEtag && remote.etag) {
           // 优先使用 ETag
           remoteChanged = last.remoteEtag !== remote.etag
+          if (remoteChanged) remoteChangeReason = 'etag-diff'
         } else if (last?.remoteMtime && remote.mtime) {
           // 其次使用远程 mtime
           remoteChanged = Math.abs(last.remoteMtime - remote.mtime) > 1000  // 容错1秒
+          if (remoteChanged) remoteChangeReason = 'mtime-diff'
+        } else if (!last) {
+          // 如果没有上次记录，需要判断是否变化
+          // 这种情况可能是首次同步或元数据丢失
+          remoteChanged = false  // 假设没变化，避免误判
+          remoteChangeReason = 'no-last-meta'
         } else {
-          // 兜底：与上次同步时间对比
-          remoteChanged = (remote.mtime || 0) > (lastMeta.lastSyncTime || 0)
+          // 兜底：如果没有remoteEtag和remoteMtime（旧版本元数据），保守处理
+          // 不判断为远程变化，避免触发不必要的同步
+          remoteChanged = false
+          remoteChangeReason = 'no-remote-meta-fallback'
         }
 
         const localChanged = localHash !== lastHash
@@ -606,6 +617,11 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
         // 如果都没变化，跳过
         if (!localChanged && !remoteChanged) {
           continue
+        }
+
+        // 记录详细判断信息
+        if (localChanged || remoteChanged) {
+          await syncLog(`[compare-detail] ${k} | local: ${localChanged ? 'changed' : 'unchanged'} | remote: ${remoteChanged ? 'changed(' + remoteChangeReason + ')' : 'unchanged'} | lastHash: ${lastHash.substring(0, 8)}... | localHash: ${localHash.substring(0, 8)}...`)
         }
 
         // 如果两边都变化了，判断为冲突
@@ -641,7 +657,8 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
 
     for (const act of plan) {
       if (Date.now() > deadline) {
-        await syncLog('[timeout] 超时中断，剩余 ' + (plan.length - __processed) + ' 个任务未完成')
+        await syncLog('[timeout] 超时中断，已完成 ' + __processed + '/' + __total + '，剩余 ' + (plan.length - __processed) + ' 个任务未完成')
+        await syncLog('[timeout] 将保存已完成任务的元数据，下次同步将继续处理剩余文件')
         break
       }
       try {
@@ -814,14 +831,21 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       }
       __processed++
 
-      // 更新状态显示实际操作
-      const shortName = act.rel.length > 30 ? '...' + act.rel.substring(act.rel.length - 27) : act.rel
-      const actionText = act.type === 'upload' ? '↑' : act.type === 'download' ? '↓' : '✗'
-      updateStatus(`${actionText} ${shortName} (${__processed}/${__total})`)
+      // 更新状态显示实际操作（显示文件名，不要太长）
+      const shortName = act.rel.length > 35 ? '...' + act.rel.substring(act.rel.length - 32) : act.rel
+      const actionEmoji = act.type === 'upload' ? '↑' : act.type === 'download' ? '↓' : act.type === 'move-remote' ? '↔' : '✗'
+      updateStatus(`${actionEmoji} ${shortName} (${__processed}/${__total})`)
+
+      // 每10个文件输出一次进度日志
+      if (__processed % 10 === 0) {
+        await syncLog(`[progress] 已处理 ${__processed}/${__total} 个文件，上传${up} 下载${down} 移动${moves} 冲突${conflicts}`)
+      }
     }
 
     // 保存同步元数据
+    await syncLog('[save-meta] 正在保存元数据，共 ' + Object.keys(newMeta.files).length + ' 个文件记录')
     await saveSyncMetadata(newMeta)
+    await syncLog('[save-meta] 元数据保存完成')
 
     try {
       let msg = `同步完成（`
