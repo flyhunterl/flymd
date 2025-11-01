@@ -618,3 +618,112 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, #app::-webkit-scrollbar,
 .upl-grid .sync-toggles { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px 24px; flex-wrap: wrap; }
 .sync-toggles .item { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .sync-toggles .lbl { font-size: 12px; color: var(--muted); }
+
+/* === 打印样式 - 确保打印整个文档而不仅是可视范围 === */
+@media print {
+  /* 隐藏所有UI元素 */
+  .titlebar,
+  .statusbar,
+  .library,
+  .recent-panel,
+  .wysiwyg-status,
+  .wysiwyg-line,
+  .wysiwyg-caret,
+  .code-copy,
+  .code-lang {
+    display: none !important;
+  }
+
+  /* 移除容器的高度限制，确保打印全部内容 */
+  html, body, #app {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .container {
+    height: auto !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  /* 预览区域：移除所有限制，显示完整内容 */
+  .preview {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    inset: auto !important;
+  }
+
+  /* 隐藏编辑器，只打印预览 */
+  .editor {
+    display: none !important;
+  }
+
+  /* 确保预览内容可见 */
+  .preview.hidden {
+    display: block !important;
+  }
+
+  /* 预览正文：移除宽度限制，使用全宽 */
+  .preview-body {
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  /* 确保库侧栏不影响布局 */
+  .container.with-library .preview {
+    padding-left: 0 !important;
+  }
+
+  /* 代码块：避免分页截断 */
+  .preview pre {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* 图片：避免分页截断 */
+  .preview img {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    max-width: 100% !important;
+  }
+
+  /* 表格：避免分页截断 */
+  .preview table {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* 标题：避免孤立在页面底部 */
+  .preview h1,
+  .preview h2,
+  .preview h3,
+  .preview h4,
+  .preview h5,
+  .preview h6 {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  /* 移除背景色，节省墨水 */
+  body, .preview {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* 代码块保持浅色背景以便区分 */
+  .preview pre {
+    background: #f5f5f5 !important;
+    border: 1px solid #ddd !important;
+  }
+
+  /* 链接：显示URL */
+  .preview a[href]:after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #666;
+  }
+}
