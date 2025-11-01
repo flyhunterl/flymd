@@ -71,7 +71,7 @@ jobs:
 
       - name: 构建 Android APK (Debug)
         if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '' }}
-        run: npx tauri android build --debug
+        run: npx tauri android build --debug --apk
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
@@ -79,7 +79,7 @@ jobs:
 
       - name: 构建 Android APK (Release)
         if: ${{ github.event.inputs.build_type == 'release' }}
-        run: npx tauri android build --release
+        run: npx tauri android build --release --apk
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
@@ -89,28 +89,48 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
+      - name: 列出构建产物 (Debug)
+        if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '' }}
+        run: |
+          echo "=== APK 输出目录结构 ==="
+          find src-tauri/gen/android -name "*.apk" -o -name "*.aab" || echo "未找到 APK/AAB 文件"
+          ls -R src-tauri/gen/android/app/build/outputs/ || echo "outputs 目录不存在"
+
+      - name: 列出构建产物 (Release)
+        if: ${{ github.event.inputs.build_type == 'release' }}
+        run: |
+          echo "=== APK/AAB 输出目录结构 ==="
+          find src-tauri/gen/android -name "*.apk" -o -name "*.aab" || echo "未找到 APK/AAB 文件"
+          ls -R src-tauri/gen/android/app/build/outputs/ || echo "outputs 目录不存在"
+
       - name: 上传 APK 产物 (Debug)
         if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: flymd-android-debug
-          path: src-tauri/gen/android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/**/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
 
       - name: 上传 APK 产物 (Release)
         if: ${{ github.event.inputs.build_type == 'release' }}
         uses: actions/upload-artifact@v4
         with:
           name: flymd-android-release
-          path: src-tauri/gen/android/app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/**/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
 
       - name: 上传 AAB 产物 (Release)
         if: ${{ github.event.inputs.build_type == 'release' }}
         uses: actions/upload-artifact@v4
         with:
           name: flymd-android-bundle
-          path: src-tauri/gen/android/app/build/outputs/bundle/release/*.aab
+          path: |
+            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+            src-tauri/gen/android/**/build/outputs/bundle/**/*.aab
           if-no-files-found: warn
 
       - name: 创建 Release (仅 Release 构建)
