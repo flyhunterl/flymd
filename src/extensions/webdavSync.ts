@@ -48,6 +48,8 @@ type SyncMetadata = {
       mtime: number
       size: number  // 添加文件大小字段
       syncTime: number
+      remoteMtime?: number  // 远端修改时间
+      remoteEtag?: string   // 远端ETag
     }
   }
   lastSyncTime: number
@@ -80,7 +82,9 @@ async function getSyncMetadata(): Promise<SyncMetadata> {
         hash: m.hash || '',
         mtime: m.mtime || 0,
         size: m.size || 0,  // 旧格式没有 size，默认为 0
-        syncTime: m.syncTime || 0
+        syncTime: m.syncTime || 0,
+        remoteMtime: m.remoteMtime || undefined,  // 新增字段
+        remoteEtag: m.remoteEtag || undefined     // 新增字段
       }
     }
 
@@ -154,6 +158,7 @@ export type WebdavSyncConfig = {
   password: string
   rootPath: string
   clockSkewMs?: number
+  conflictStrategy?: 'ask' | 'newest' | 'last-wins'  // 冲突策略
 }
 
 let _store: Store | null = null
@@ -178,6 +183,7 @@ export async function getWebdavSyncConfig(): Promise<WebdavSyncConfig> {
     password: String(raw?.password || ''),
     rootPath: String(raw?.rootPath || '/flymd'),
     clockSkewMs: Number(raw?.clockSkewMs) || 0,
+    conflictStrategy: raw?.conflictStrategy || 'newest',  // 默认newest
   }
   return cfg
 }
@@ -226,7 +232,7 @@ function toEpochMs(v: any): number {
   const n = Number(v); return Number.isFinite(n) ? n : 0
 }
 
-type FileEntry = { path: string; mtime: number; size: number; hash?: string; isDir?: boolean }
+type FileEntry = { path: string; mtime: number; size: number; hash?: string; isDir?: boolean; etag?: string }
 
 async function scanLocal(root: string, lastMeta?: SyncMetadata): Promise<Map<string, FileEntry>> {
   const map = new Map<string, FileEntry>()
@@ -284,10 +290,10 @@ if (name.startsWith('.')) { await syncLog('[scan-skip-hidden] ' + (rel ? rel + '
   return map
 }
 
-async function listRemoteDir(baseUrl: string, auth: { username: string; password: string }, remotePath: string): Promise<{ files: { name: string; isDir: boolean; mtime?: number }[] }> {
+async function listRemoteDir(baseUrl: string, auth: { username: string; password: string }, remotePath: string): Promise<{ files: { name: string; isDir: boolean; mtime?: number; etag?: string }[] }> {
   const http = await getHttpClient(); if (!http) throw new Error('no http client')
   const url = joinUrl(baseUrl, remotePath)
-  const body = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/><d:resourcetype/></d:prop></d:propfind>`
+  const body = `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/><d:getetag/><d:resourcetype/></d:prop></d:propfind>`
   const headers: Record<string,string> = { Depth: '1', 'Content-Type': 'application/xml' }
   const authStr = btoa(`${auth.username}:${auth.password}`)
   headers['Authorization'] = `Basic ${authStr}`
@@ -306,13 +312,14 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
       text = typeof resp.text === 'function' ? await resp.text() : (resp.data || '')
     } else { throw e }
   }
-  const files: { name: string; isDir: boolean; mtime?: number }[] = []
+  const files: { name: string; isDir: boolean; mtime?: number; etag?: string }[] = []
   try {
     const doc = new DOMParser().parseFromString(String(text || ''), 'application/xml')
     const respNodes = Array.from(doc.getElementsByTagNameNS('*','response'))
     for (const r of respNodes) {
       const hrefEl = (r as any).getElementsByTagNameNS?.('*','href')?.[0] as Element | undefined
       const mEl = (r as any).getElementsByTagNameNS?.('*','getlastmodified')?.[0] as Element | undefined
+      const etagEl = (r as any).getElementsByTagNameNS?.('*','getetag')?.[0] as Element | undefined
       const typeEl = (r as any).getElementsByTagNameNS?.('*','resourcetype')?.[0] as Element | undefined
       const rawHref = hrefEl?.textContent || ''
       if (!rawHref) continue
@@ -358,7 +365,8 @@ async function listRemoteDir(baseUrl: string, auth: { username: string; password
                     /\bcollection\b/i.test(typeXml) ||
                     rawHref.endsWith('/')
       const mt = mEl?.textContent ? toEpochMs(mEl.textContent) : undefined
-      files.push({ name, isDir, mtime: mt })
+      const etag = etagEl?.textContent ? String(etagEl.textContent).replace(/^["']|["']$/g, '') : undefined
+      files.push({ name, isDir, mtime: mt, etag })
     }
   } catch (e) {
     await syncLog('[remote-propfind] 解析XML失败: ' + (e?.message || e))
@@ -391,7 +399,7 @@ async function listRemoteRecursively(baseUrl: string, auth: { username: string; 
       if (f.isDir) {
         await walk(r)
       } else {
-        map.set(r, { path: r, mtime: toEpochMs(f.mtime), size: 0 })
+        map.set(r, { path: r, mtime: toEpochMs(f.mtime), size: 0, etag: f.etag })
       }
     }
   }
@@ -430,6 +438,22 @@ async function deleteRemoteFile(baseUrl: string, auth: { username: string; passw
   const authStr = btoa(`${auth.username}:${auth.password}`)
   const headers: Record<string,string> = { Authorization: `Basic ${authStr}` }
   const resp = await http.fetch(url, { method: 'DELETE', headers })
+  const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
+  if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
+}
+
+// WebDAV MOVE 操作：用于重命名远端文件
+async function moveRemoteFile(baseUrl: string, auth: { username: string; password: string }, fromPath: string, toPath: string): Promise<void> {
+  const http = await getHttpClient(); if (!http) throw new Error('no http client')
+  const fromUrl = joinUrl(baseUrl, fromPath)
+  const toUrl = joinUrl(baseUrl, toPath)
+  const authStr = btoa(`${auth.username}:${auth.password}`)
+  const headers: Record<string,string> = {
+    Authorization: `Basic ${authStr}`,
+    Destination: toUrl,
+    Overwrite: 'T'
+  }
+  const resp = await http.fetch(fromUrl, { method: 'MOVE', headers })
   const ok = resp?.ok === true || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300)
   if (!ok) throw new Error('HTTP ' + (resp?.status || ''))
 }
@@ -474,16 +498,64 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     // 获取上次同步的元数据
     const lastMeta = await getSyncMetadata()
 
-    // 发现差异
-    const [localIdx, remoteIdx] = await Promise.all([
-      scanLocal(localRoot, lastMeta),  // 传入 lastMeta 用于哈希缓存
-      listRemoteRecursively(cfg.baseUrl, auth, cfg.rootPath)
-    ])
+    // 扫描本地文件
+    updateStatus('正在扫描本地文件…')
+    const localIdx = await scanLocal(localRoot, lastMeta)  // 传入 lastMeta 用于哈希缓存
 
-    const plan: { type: 'upload' | 'download' | 'delete' | 'conflict'; rel: string; reason?: string }[] = []
+    // 添加连接服务器提示
+    updateStatus('正在连接 WebDAV 服务器…')
+    await syncLog('[remote] 开始扫描远程文件')
+
+    // 扫描远程文件
+    const remoteIdx = await listRemoteRecursively(cfg.baseUrl, auth, cfg.rootPath)
+
+    const plan: { type: 'upload' | 'download' | 'delete' | 'conflict' | 'move-remote'; rel: string; oldRel?: string; reason?: string }[] = []
+
+    // 添加对比阶段提示
+    updateStatus('正在对比本地和远程文件…')
+    await syncLog('[compare] 开始对比文件差异')
+
     const allKeys = new Set<string>([...localIdx.keys(), ...remoteIdx.keys(), ...Object.keys(lastMeta.files)])
 
+    // 重命名检测：找出"本地仅有"和"远程仅有"中可能是重命名的文件
+    const localOnly = new Set<string>()
+    const remoteOnly = new Set<string>()
     for (const k of allKeys) {
+      if (localIdx.has(k) && !remoteIdx.has(k)) localOnly.add(k)
+      if (!localIdx.has(k) && remoteIdx.has(k)) remoteOnly.add(k)
+    }
+
+    const renamedPairs = new Map<string, string>()  // oldPath -> newPath
+    for (const newPath of localOnly) {
+      const local = localIdx.get(newPath)
+      if (!local?.hash) continue
+      // 检查是否有远程文件的哈希与本地新文件的哈希相同
+      for (const oldPath of remoteOnly) {
+        const lastFile = lastMeta.files[oldPath]
+        if (lastFile && lastFile.hash === local.hash) {
+          // 找到重命名！
+          await syncLog('[rename-detect] ' + oldPath + ' -> ' + newPath)
+          renamedPairs.set(oldPath, newPath)
+          localOnly.delete(newPath)
+          remoteOnly.delete(oldPath)
+          break
+        }
+      }
+    }
+
+    // 为重命名操作生成move-remote计划
+    for (const [oldPath, newPath] of renamedPairs.entries()) {
+      plan.push({ type: 'move-remote', rel: newPath, oldRel: oldPath, reason: 'renamed' })
+    }
+
+    let compareCount = 0
+    const totalCompare = allKeys.size
+    for (const k of allKeys) {
+      compareCount++
+      if (compareCount % 10 === 0) {
+        updateStatus(`正在对比变化… ${compareCount}/${totalCompare}`)
+      }
+
       const local = localIdx.get(k)
       const remote = remoteIdx.get(k)
       const last = lastMeta.files[k]
@@ -494,8 +566,6 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           // 上次同步过，现在远程没有了 → 可能是远程被删除，但也可能是编码问题或其他误判
           // 为了安全起见，不自动删除本地文件，而是记录警告
           await syncLog('[warn] ' + k + ' 远程未找到，但为了安全不删除本地文件（可能是误判）')
-          // 不再执行删除操作
-          // plan.push({ type: 'download', rel: k, reason: 'remote-deleted' })
         } else {
           // 上次没同步过 → 本地新增，上传
           plan.push({ type: 'upload', rel: k, reason: 'local-new' })
@@ -505,7 +575,6 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       else if (!local && remote) {
         if (last) {
           // 上次同步过，现在本地没有了
-          // 可能情况：1) 本地文件被误删 2) 用户主动删除
           // 安全策略：不删除远程，而是重新下载到本地（恢复文件）
           await syncLog('[detect] ' + k + ' 本地文件缺失，将从远程下载恢复')
           plan.push({ type: 'download', rel: k, reason: 'local-missing' })
@@ -516,30 +585,31 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       }
       // 情况3：本地和远程都有
       else if (local && remote) {
-        // 先下载远程文件计算哈希
-        let remoteHash = ''
-        try {
-          const remoteData = await downloadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(k))
-          remoteHash = await calculateFileHash(remoteData)
-        } catch (e) {
-          await syncLog('[warn] ' + k + ' 无法下载远程文件计算哈希: ' + (e?.message || e))
-        }
-
         const localHash = local.hash || ''
         const lastHash = last?.hash || ''
 
-        // 哈希相同 → 无需同步
-        if (localHash === remoteHash) {
-          await syncLog('[skip] ' + k + ' 哈希相同，跳过')
+        // 使用 ETag 或 mtime 判断远程是否变化（避免下载）
+        let remoteChanged = false
+        if (last?.remoteEtag && remote.etag) {
+          // 优先使用 ETag
+          remoteChanged = last.remoteEtag !== remote.etag
+        } else if (last?.remoteMtime && remote.mtime) {
+          // 其次使用远程 mtime
+          remoteChanged = Math.abs(last.remoteMtime - remote.mtime) > 1000  // 容错1秒
+        } else {
+          // 兜底：与上次同步时间对比
+          remoteChanged = (remote.mtime || 0) > (lastMeta.lastSyncTime || 0)
+        }
+
+        const localChanged = localHash !== lastHash
+
+        // 如果都没变化，跳过
+        if (!localChanged && !remoteChanged) {
           continue
         }
 
-        // 检查是否冲突：本地和远程都相对于上次同步发生了变化
-        const localChanged = localHash !== lastHash
-        const remoteChanged = remoteHash !== lastHash
-
+        // 如果两边都变化了，判断为冲突
         if (localChanged && remoteChanged) {
-          // 冲突！两边都修改了
           plan.push({ type: 'conflict', rel: k, reason: 'both-modified' })
           await syncLog('[conflict!] ' + k + ' 本地和远程都已修改')
         } else if (localChanged) {
@@ -548,16 +618,12 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
         } else if (remoteChanged) {
           // 只有远程改了 → 下载
           plan.push({ type: 'download', rel: k, reason: 'remote-modified' })
-        } else {
-          // 都没改，但哈希不同（理论上不应该发生）
-          // 按时间戳处理
-          const lm = Number(local.mtime) + (cfg.clockSkewMs || 0)
-          const rm = Number(remote.mtime) - (cfg.clockSkewMs || 0)
-          if (lm > rm) plan.push({ type: 'upload', rel: k, reason: 'local-newer-time' })
-          else if (rm > lm) plan.push({ type: 'download', rel: k, reason: 'remote-newer-time' })
         }
       }
     }
+
+    updateStatus(`对比完成，发现 ${plan.length} 个变化`)
+    await syncLog('[compare-done] 发现 ' + plan.length + ' 个需要同步的操作')
 
     // 设置 deadline：只针对上传/下载循环，不包括扫描时间
     // 关闭前同步给更多时间（最多60秒），让同步能完整完成
@@ -565,8 +631,13 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     let __processed = 0; let __total = plan.length;
     let __fail = 0; let __lastErr = ""
     updateStatus(`正在同步… 0/${__total}`)
-    let up = 0, down = 0, del = 0, conflicts = 0
-    const newMeta: SyncMetadata = { files: {}, lastSyncTime: Date.now() }
+    let up = 0, down = 0, del = 0, conflicts = 0, moves = 0
+
+    // 全量覆盖：初始化 newMeta 时复制 lastMeta.files，保留未变化的条目
+    const newMeta: SyncMetadata = {
+      files: { ...lastMeta.files },  // 复制所有旧条目
+      lastSyncTime: Date.now()
+    }
 
     for (const act of plan) {
       if (Date.now() > deadline) {
@@ -574,43 +645,109 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
         break
       }
       try {
-        if (act.type === 'conflict') {
-          // 处理冲突：提示用户
-          conflicts++
-          await syncLog('[conflict] ' + act.rel + ' - 需要手动处理')
-          try {
-            const msg = `文件冲突：${act.rel}\n\n本地和远程都已修改。\n\n请选择：\n- 确定：保留本地版本（上传）\n- 取消：保留远程版本（下载）`
-            if (confirm(msg)) {
-              // 用户选择保留本地 → 上传
-              await syncLog('[conflict-resolve] ' + act.rel + ' 用户选择保留本地版本')
-              const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
-              const buf = await readFile(full as any)
-              const hash = await calculateFileHash(buf as Uint8Array)
-              const relPath = encodePath(act.rel)
-              const relDir = relPath.split('/').slice(0, -1).join('/')
-              const remoteDir = (cfg.rootPath || '').replace(/\/+$/, '') + (relDir ? '/' + relDir : '')
-              await ensureRemoteDir(cfg.baseUrl, auth, remoteDir)
-              await uploadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel), buf as any)
-              up++
-              // 记录到元数据
-              const meta = await stat(full)
-              newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), size: Number((meta as any)?.size || 0), syncTime: Date.now() }
-            } else {
-              // 用户选择保留远程 → 下载
-              await syncLog('[conflict-resolve] ' + act.rel + ' 用户选择保留远程版本')
-              const data = await downloadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
-              const hash = await calculateFileHash(data)
-              const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
-              const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
-              if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
-              await writeFile(full as any, data as any)
-              down++
-              // 记录到元数据
-              const meta = await stat(full)
-              newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), size: Number((meta as any)?.size || 0), syncTime: Date.now() }
+        if (act.type === 'move-remote') {
+          // 处理重命名：使用 WebDAV MOVE
+          moves++
+          await syncLog('[move-remote] ' + (act.oldRel || '') + ' -> ' + act.rel)
+          const oldRemotePath = cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.oldRel || '')
+          const newRemotePath = cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel)
+          // 确保目标目录存在
+          const relPath = encodePath(act.rel)
+          const relDir = relPath.split('/').slice(0, -1).join('/')
+          const remoteDir = (cfg.rootPath || '').replace(/\/+$/, '') + (relDir ? '/' + relDir : '')
+          await ensureRemoteDir(cfg.baseUrl, auth, remoteDir)
+          // 执行 MOVE
+          await moveRemoteFile(cfg.baseUrl, auth, oldRemotePath, newRemotePath)
+          await syncLog('[ok] move-remote ' + (act.oldRel || '') + ' -> ' + act.rel)
+          // 更新元数据
+          const local = localIdx.get(act.rel)
+          if (local) {
+            const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
+            const meta = await stat(full)
+            newMeta.files[act.rel] = {
+              hash: local.hash || '',
+              mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs),
+              size: Number((meta as any)?.size || 0),
+              syncTime: Date.now(),
+              remoteMtime: local.mtime,
+              remoteEtag: undefined
             }
-          } catch (e) {
-            await syncLog('[conflict-error] ' + act.rel + ' 处理冲突失败: ' + (e?.message || e))
+          }
+          // 删除旧路径的元数据
+          if (act.oldRel) delete newMeta.files[act.oldRel]
+        } else if (act.type === 'conflict') {
+          // 处理冲突：根据策略自动选择或询问用户
+          conflicts++
+          await syncLog('[conflict] ' + act.rel + ' - 策略: ' + cfg.conflictStrategy)
+
+          let chooseLocal = false  // 默认选择远程
+
+          if (cfg.conflictStrategy === 'ask') {
+            // 询问用户
+            try {
+              const msg = `文件冲突：${act.rel}\n\n本地和远程都已修改。\n\n请选择：\n- 确定：保留本地版本（上传）\n- 取消：保留远程版本（下载）`
+              chooseLocal = confirm(msg)
+            } catch {
+              chooseLocal = false
+            }
+          } else if (cfg.conflictStrategy === 'newest') {
+            // 按时间戳选择较新者
+            const local = localIdx.get(act.rel)
+            const remote = remoteIdx.get(act.rel)
+            const lm = Number(local?.mtime || 0)
+            const rm = Number(remote?.mtime || 0)
+            chooseLocal = lm > rm
+            await syncLog('[conflict-auto] ' + act.rel + ' 选择较新者: ' + (chooseLocal ? '本地' : '远程'))
+          } else if (cfg.conflictStrategy === 'last-wins') {
+            // 总是选择远程（最后写入者获胜）
+            chooseLocal = false
+            await syncLog('[conflict-auto] ' + act.rel + ' 选择远程（last-wins）')
+          }
+
+          if (chooseLocal) {
+            // 保留本地 → 上传
+            await syncLog('[conflict-resolve] ' + act.rel + ' 保留本地版本')
+            const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
+            const buf = await readFile(full as any)
+            const hash = await calculateFileHash(buf as Uint8Array)
+            const relPath = encodePath(act.rel)
+            const relDir = relPath.split('/').slice(0, -1).join('/')
+            const remoteDir = (cfg.rootPath || '').replace(/\/+$/, '') + (relDir ? '/' + relDir : '')
+            await ensureRemoteDir(cfg.baseUrl, auth, remoteDir)
+            await uploadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel), buf as any)
+            up++
+            // 记录到元数据
+            const meta = await stat(full)
+            const remote = remoteIdx.get(act.rel)
+            newMeta.files[act.rel] = {
+              hash,
+              mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs),
+              size: Number((meta as any)?.size || 0),
+              syncTime: Date.now(),
+              remoteMtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs),
+              remoteEtag: remote?.etag
+            }
+          } else {
+            // 保留远程 → 下载
+            await syncLog('[conflict-resolve] ' + act.rel + ' 保留远程版本')
+            const data = await downloadFile(cfg.baseUrl, auth, cfg.rootPath.replace(/\/+$/,'') + '/' + encodePath(act.rel))
+            const hash = await calculateFileHash(data)
+            const full = localRoot + (localRoot.includes('\\') ? '\\' : '/') + act.rel.replace(/\//g, localRoot.includes('\\') ? '\\' : '/')
+            const dir = full.split(/\\|\//).slice(0, -1).join(localRoot.includes('\\') ? '\\' : '/')
+            if (!(await exists(dir as any))) { try { await mkdir(dir as any, { recursive: true } as any) } catch {} }
+            await writeFile(full as any, data as any)
+            down++
+            // 记录到元数据
+            const meta = await stat(full)
+            const remote = remoteIdx.get(act.rel)
+            newMeta.files[act.rel] = {
+              hash,
+              mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs),
+              size: Number((meta as any)?.size || 0),
+              syncTime: Date.now(),
+              remoteMtime: remote?.mtime,
+              remoteEtag: remote?.etag
+            }
           }
         } else if (act.type === 'download') {
           if (act.reason === 'remote-deleted') {
@@ -630,7 +767,15 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
             await syncLog('[ok] download ' + act.rel)
             // 记录到元数据
             const meta = await stat(full)
-            newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), size: Number((meta as any)?.size || 0), syncTime: Date.now() }
+            const remote = remoteIdx.get(act.rel)
+            newMeta.files[act.rel] = {
+              hash,
+              mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs),
+              size: Number((meta as any)?.size || 0),
+              syncTime: Date.now(),
+              remoteMtime: remote?.mtime,  // 保存远端mtime
+              remoteEtag: remote?.etag     // 保存远端etag
+            }
           }
         } else if (act.type === 'upload') {
           await syncLog('[upload] ' + act.rel + ' (' + act.reason + ')')
@@ -646,7 +791,15 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
           await syncLog('[ok] upload ' + act.rel)
           // 记录到元数据
           const meta = await stat(full)
-          newMeta.files[act.rel] = { hash, mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs), size: Number((meta as any)?.size || 0), syncTime: Date.now() }
+          const local = localIdx.get(act.rel)
+          newMeta.files[act.rel] = {
+            hash,
+            mtime: toEpochMs((meta as any)?.modifiedAt || (meta as any)?.mtime || (meta as any)?.mtimeMs),
+            size: Number((meta as any)?.size || 0),
+            syncTime: Date.now(),
+            remoteMtime: local?.mtime,  // 上传后远端mtime应与本地相同
+            remoteEtag: undefined       // 上传后暂时没有etag
+          }
         } else if (act.type === 'delete') {
           // 不再自动删除远程文件，只记录警告
           await syncLog('[skip-delete-remote] ' + act.rel + ' 为了安全，不自动删除远程文件')
@@ -674,13 +827,14 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
       let msg = `同步完成（`
       if (up > 0) msg += `↑${up} `
       if (down > 0) msg += `↓${down} `
+      if (moves > 0) msg += `↔${moves} `
       if (del > 0) msg += `✗${del} `
       if (conflicts > 0) msg += `⚠${conflicts} `
       msg += `）`
       updateStatus(msg)
       clearStatus()
     } catch {}
-    await syncLog('[done] up=' + up + ' down=' + down + ' del=' + del + ' conflicts=' + conflicts + ' total=' + __total);
+    await syncLog('[done] up=' + up + ' down=' + down + ' moves=' + moves + ' del=' + del + ' conflicts=' + conflicts + ' total=' + __total);
     return { uploaded: up, downloaded: down }
   } catch (e) { try { await syncLog('[error] ' + (e?.message || e)) } catch {}
     console.warn('sync failed', e)
@@ -795,6 +949,16 @@ export async function openWebdavSyncDialog(): Promise<void> {
               <div class="upl-hint">建议 120000（2分钟），网络较慢时可适当增加</div>
             </div>
 
+            <label for="sync-conflict-strategy">冲突策略</label>
+            <div class="upl-field">
+              <select id="sync-conflict-strategy" style="width: 100%; padding: 8px; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background: var(--input-bg, #fff); color: var(--text-color, #333); font-size: 14px;">
+                <option value="newest">自动选择较新文件（推荐）</option>
+                <option value="ask">每次询问用户</option>
+                <option value="last-wins">总是保留远程版本</option>
+              </select>
+              <div class="upl-hint">当本地和远程文件都被修改时的处理策略</div>
+            </div>
+
             <div class="upl-section-title">WebDAV 服务器</div>
             <label for="sync-baseurl">Base URL</label>
             <div class="upl-field">
@@ -840,6 +1004,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
   const elOnStartup = overlay.querySelector('#sync-onstartup') as HTMLInputElement
   const elOnShutdown = overlay.querySelector('#sync-onshutdown') as HTMLInputElement
   const elTimeout = overlay.querySelector('#sync-timeout') as HTMLInputElement
+  const elConflictStrategy = overlay.querySelector('#sync-conflict-strategy') as HTMLSelectElement
   const elBase = overlay.querySelector('#sync-baseurl') as HTMLInputElement
   const elRoot = overlay.querySelector('#sync-root') as HTMLInputElement
   const elUser = overlay.querySelector('#sync-user') as HTMLInputElement
@@ -850,6 +1015,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
   elOnStartup.checked = !!cfg.onStartup
   elOnShutdown.checked = !!cfg.onShutdown
   elTimeout.value = String(cfg.timeoutMs || 120000)
+  elConflictStrategy.value = cfg.conflictStrategy || 'newest'
   elBase.value = cfg.baseUrl || ''
   elRoot.value = cfg.rootPath || '/flymd'
   elUser.value = cfg.username || ''
@@ -863,6 +1029,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
         onStartup: elOnStartup.checked,
         onShutdown: elOnShutdown.checked,
         timeoutMs: Math.max(1000, Number(elTimeout.value) || 120000),
+        conflictStrategy: elConflictStrategy.value as 'ask' | 'newest' | 'last-wins',
         baseUrl: elBase.value.trim(),
         rootPath: elRoot.value.trim() || '/flymd',
         username: elUser.value,
