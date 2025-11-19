@@ -1,9 +1,9 @@
 // xxtui 待办推送插件（beta）
 // 说明：
-// - 扫描当前文档中形如「- [ ] 任务内容」的行
-// - 支持两种模式：
-//   1）instant：立即推送到 https://www.xxtui.com/xxtui/{apikey}
-//   2）scheduled：解析行尾 @YYYY-MM-DD HH:mm，调用 https://www.xxtui.com/scheduled/reminder/{apikey}
+// - 扫描当前文档中形如「- [ ] 任务内容」或「- [x] 任务内容」的行
+// - 菜单提供推送（全部/已完成/未完成）与创建提醒两个入口
+//   * 推送：立即调用 https://www.xxtui.com/xxtui/{apikey}
+//   * 创建提醒：解析行尾 @YYYY-MM-DD HH:mm / @自然语言 调用 https://www.xxtui.com/scheduled/reminder/{apikey}
 // - 配置通过插件设置页（openSettings）保存在 context.storage 中
 
 // 配置存储键
@@ -12,10 +12,24 @@ const CFG_KEY = 'xxtui.todo.config'
 // 默认配置
 const DEFAULT_CFG = {
   apiKey: '',
-  mode: 'scheduled', // scheduled / instant
   from: '飞速MarkDown',
   channel: ''
 }
+
+const MENU_ACTIONS = {
+  PUSH_ALL: 'push_all',
+  PUSH_DONE: 'push_done',
+  PUSH_TODO: 'push_todo',
+  CREATE_REMINDER: 'create_reminder'
+}
+
+const MENU_OVERLAY_ID = 'xtui-todo-menu-overlay'
+const MENU_PANEL_ID = 'xtui-todo-menu-panel'
+let menuKeyHandler = null
+let pointerTrackerAttached = false
+let lastPointerPos = { x: 160, y: 80 }
+let lastAnchorRect = null
+let menuAnchorEl = null
 
 // 注入设置面板样式（仿 AI 助手风格，简化版）
 function ensureXxtuiCss() {
@@ -47,6 +61,259 @@ function ensureXxtuiCss() {
   }
 }
 
+function ensureMenuCss() {
+  try {
+    const doc = window && window.document ? window.document : null
+    if (!doc) return
+    if (doc.getElementById('xtui-todo-menu-style')) return
+    const css = doc.createElement('style')
+    css.id = 'xtui-todo-menu-style'
+    css.textContent = [
+      '#xtui-todo-menu-overlay{position:fixed;inset:0;background:transparent;z-index:2147483601;}',
+      '#xtui-todo-menu-panel{position:absolute;left:0;top:0;min-width:220px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 32px rgba(15,23,42,.2);font-family:-apple-system,BlinkMacSystemFont,system-ui;padding:6px 0;transition:opacity .12s ease,transform .12s ease;}',
+      '#xtui-todo-menu-panel button{width:100%;text-align:left;border:none;background:transparent;font-size:14px;color:#0f172a;padding:8px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;}',
+      '#xtui-todo-menu-panel button:hover{background:#f1f5f9;}',
+      '.xtui-menu-group{padding:2px 0;}',
+      '.xtui-menu-title{font-size:12px;color:#94a3b8;padding:4px 16px 6px;text-transform:uppercase;letter-spacing:.08em;}',
+      '.xtui-menu-divider{height:1px;background:#e2e8f0;margin:4px 0;}',
+      '.xtui-menu-note{font-size:12px;color:#94a3b8;margin-left:8px;}'
+    ].join('')
+    doc.head.appendChild(css)
+  } catch {
+    // 忽略样式错误
+  }
+}
+
+function ensurePointerTracker() {
+  try {
+    if (pointerTrackerAttached) return
+    const doc = window && window.document ? window.document : null
+    if (!doc) return
+    const handler = (e) => {
+      if (!e) return
+      const x = Number.isFinite(e.clientX) ? e.clientX : lastPointerPos.x
+      const y = Number.isFinite(e.clientY) ? e.clientY : lastPointerPos.y
+      lastPointerPos = { x, y }
+    }
+    doc.addEventListener('pointerdown', handler, { passive: true })
+    doc.addEventListener('pointermove', handler, { passive: true })
+    pointerTrackerAttached = true
+  } catch {
+    // ignore
+  }
+}
+
+function captureAnchorRect(el) {
+  try {
+    if (!el || typeof el.getBoundingClientRect !== 'function') return null
+    const rect = el.getBoundingClientRect()
+    if (!rect) return null
+    const { left, top, right, bottom, width, height } = rect
+    if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(width)) return null
+    const data = { left, top, right, bottom, width, height }
+    lastAnchorRect = data
+    return data
+  } catch {
+    return null
+  }
+}
+
+function getAnchorRect(doc) {
+  const anchor = ensureMenuAnchor(doc)
+  if (anchor) {
+    const rect = captureAnchorRect(anchor)
+    if (rect) return rect
+  }
+  const fallback = captureAnchorRect(doc && doc.activeElement ? doc.activeElement : null)
+  if (fallback) return fallback
+  return lastAnchorRect
+}
+
+function findMenuAnchorElement(doc) {
+  if (!doc || !doc.querySelectorAll) return null
+  const candidates = doc.querySelectorAll('button, [role="button"], a[role="menuitem"], .menu-item')
+  for (const node of candidates) {
+    if (!node || typeof node.closest !== 'function') continue
+    if (node.closest('#' + MENU_OVERLAY_ID)) continue
+    const title = (node.getAttribute && node.getAttribute('title')) || ''
+    const txt = (node.textContent || '').trim()
+    if (!txt && !title) continue
+    if ((txt && txt.startsWith('待办')) || (title && title.includes('待办'))) {
+      return node
+    }
+  }
+  return null
+}
+
+function ensureMenuAnchor(doc) {
+  try {
+    if (menuAnchorEl && doc && doc.contains && doc.contains(menuAnchorEl)) {
+      return menuAnchorEl
+    }
+    const found = findMenuAnchorElement(doc)
+    if (found) {
+      menuAnchorEl = found
+      captureAnchorRect(found)
+      return found
+    }
+  } catch {
+    // ignore
+  }
+  return null
+}
+
+function positionMenuPanel(panel, anchorRect) {
+  try {
+    if (!panel) return
+    const doc = window && window.document ? window.document : null
+    if (!doc) return
+    const viewportW = doc.documentElement && doc.documentElement.clientWidth
+      ? doc.documentElement.clientWidth
+      : (window && window.innerWidth) || 1280
+    const viewportH = doc.documentElement && doc.documentElement.clientHeight
+      ? doc.documentElement.clientHeight
+      : (window && window.innerHeight) || 720
+    const padding = 12
+
+    panel.style.opacity = '0'
+    panel.style.transform = 'translateY(-4px)'
+    panel.style.pointerEvents = 'none'
+
+    requestAnimationFrame(() => {
+      const rect = panel.getBoundingClientRect()
+      const panelW = rect.width || 220
+      const panelH = rect.height || 180
+      let left
+      let top
+
+      if (anchorRect && Number.isFinite(anchorRect.left) && Number.isFinite(anchorRect.width)) {
+        left = anchorRect.left + (anchorRect.width / 2) - 20
+        const anchorBottom = Number.isFinite(anchorRect.bottom)
+          ? anchorRect.bottom
+          : (anchorRect.top || 0) + (anchorRect.height || 0)
+        top = anchorBottom + 8
+      } else {
+        const pointerX = Math.min(Math.max(lastPointerPos.x || viewportW / 2, padding), viewportW - padding)
+        const pointerY = Math.min(Math.max(lastPointerPos.y || 48, padding), viewportH - padding)
+        left = pointerX - panelW / 2
+        top = pointerY + 12
+      }
+
+      if (left < padding) left = padding
+      if (left + panelW + padding > viewportW) left = viewportW - panelW - padding
+      if (top + panelH + padding > viewportH) top = viewportH - panelH - padding
+      if (top < padding) top = padding
+
+      panel.style.left = left + 'px'
+      panel.style.top = top + 'px'
+      panel.style.opacity = '1'
+      panel.style.transform = 'translateY(0)'
+      panel.style.pointerEvents = 'auto'
+    })
+  } catch {
+    // ignore
+  }
+}
+
+function removeMenuOverlay() {
+  try {
+    const doc = window && window.document ? window.document : null
+    if (!doc) return
+    const overlay = doc.getElementById(MENU_OVERLAY_ID)
+    if (overlay) {
+      overlay.remove()
+    }
+    if (menuKeyHandler) {
+      doc.removeEventListener('keydown', menuKeyHandler)
+      menuKeyHandler = null
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function showMenuOverlay(context) {
+  try {
+    const doc = window && window.document ? window.document : null
+    if (!doc) {
+      Promise.resolve(handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)).catch(() => {})
+      return
+    }
+    ensureMenuCss()
+    ensurePointerTracker()
+    const anchorRect = getAnchorRect(doc)
+    removeMenuOverlay()
+    const overlay = doc.createElement('div')
+    overlay.id = MENU_OVERLAY_ID
+    const inner = [
+      '<div id="' + MENU_PANEL_ID + '">',
+      ' <div class="xtui-menu-group">',
+      '  <div class="xtui-menu-title">推送</div>',
+      '  <button data-action="' + MENU_ACTIONS.PUSH_ALL + '">全部<span class="xtui-menu-note">含已完成/未完成</span></button>',
+      '  <button data-action="' + MENU_ACTIONS.PUSH_DONE + '">已完成</button>',
+      '  <button data-action="' + MENU_ACTIONS.PUSH_TODO + '">未完成</button>',
+      ' </div>',
+      ' <div class="xtui-menu-divider"></div>',
+      ' <div class="xtui-menu-group">',
+      '  <button data-action="' + MENU_ACTIONS.CREATE_REMINDER + '">创建提醒<span class="xtui-menu-note">@时间</span></button>',
+      ' </div>',
+      '</div>'
+    ].join('')
+    overlay.innerHTML = inner
+    doc.body.appendChild(overlay)
+
+    const panel = overlay.querySelector('#' + MENU_PANEL_ID)
+    if (panel) {
+      positionMenuPanel(panel, anchorRect)
+    }
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) removeMenuOverlay()
+    })
+
+    const buttons = overlay.querySelectorAll('button[data-action]')
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault()
+        ev.stopPropagation()
+        const action = btn.getAttribute('data-action')
+        removeMenuOverlay()
+        if (action) {
+          Promise.resolve(handleMenuAction(context, action)).catch(() => {})
+        }
+      })
+    })
+
+    menuKeyHandler = (e) => {
+      if (e.key === 'Escape') {
+        removeMenuOverlay()
+      }
+    }
+    doc.addEventListener('keydown', menuKeyHandler)
+  } catch (error) {
+    removeMenuOverlay()
+    Promise.resolve(handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)).catch(() => {})
+  }
+}
+
+function toggleMenuOverlay(context) {
+  try {
+    const doc = window && window.document ? window.document : null
+    if (!doc) {
+      Promise.resolve(handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)).catch(() => {})
+      return
+    }
+    const overlay = doc.getElementById(MENU_OVERLAY_ID)
+    if (overlay) {
+      removeMenuOverlay()
+      return
+    }
+    showMenuOverlay(context)
+  } catch {
+    Promise.resolve(handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)).catch(() => {})
+  }
+}
+
 // 加载配置
 async function loadCfg(context) {
   try {
@@ -69,7 +336,7 @@ async function saveCfg(context, cfg) {
   }
 }
 
-// 从文档内容中提取未完成待办（仅识别「- [ ] 文本」或「* [ ] 文本」）
+// 从文档内容中提取所有待办（识别「- [ ] 文本」/「- [x] 文本」以及 * 列表）
 function extractTodos(text) {
   const src = String(text || '')
   const lines = src.split(/\r?\n/)
@@ -78,18 +345,37 @@ function extractTodos(text) {
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]
     if (!raw) continue
-    const m = raw.match(/^\s*[-*]\s+\[\s\]\s+(.+)$/)
+    const m = raw.match(/^\s*[-*]\s+\[(\s|x|X)\]\s+(.+)$/)
     if (!m) continue
-    const title = String(m[1] || '').trim()
+    const title = String(m[2] || '').trim()
     if (!title) continue
+    const marker = String(m[1] || '').trim().toLowerCase()
     out.push({
       title,
       content: raw,
-      line: i + 1
+      line: i + 1,
+      done: marker === 'x'
     })
   }
 
   return out
+}
+
+function filterTodosByType(todos, type) {
+  const list = Array.isArray(todos) ? todos : []
+  if (type === MENU_ACTIONS.PUSH_DONE) return list.filter((item) => item && item.done)
+  if (type === MENU_ACTIONS.PUSH_TODO) return list.filter((item) => item && !item.done)
+  return list.slice()
+}
+
+function describeFilter(type) {
+  if (type === MENU_ACTIONS.PUSH_DONE) return '已完成'
+  if (type === MENU_ACTIONS.PUSH_TODO) return '未完成'
+  return '全部'
+}
+
+function todoStatusTag(todo) {
+  return todo && todo.done ? '[DONE]' : '[TODO]'
 }
 
 // 解析表达式（@ 后面的部分），返回秒级时间戳
@@ -212,11 +498,14 @@ async function pushInstantTodo(context, cfg, todo) {
   if (!key) throw new Error('NO_API_KEY')
 
   const url = 'https://www.xxtui.com/xxtui/' + encodeURIComponent(key)
-  const title = '[TODO] ' + String(todo.title || '').trim()
+  const text = String(todo && todo.title || '').trim()
+  const title = todoStatusTag(todo) + ' ' + (text || '待办事项')
   const lines = []
-  const mainText = String(todo.title || '').trim() || title
+  const mainText = text || title
   lines.push('提醒内容:')
   lines.push(mainText)
+  lines.push('')
+  lines.push('状态：' + ((todo && todo.done) ? '已完成' : '未完成'))
   lines.push('')
   lines.push('来源：' + ((cfg && cfg.from) || '飞速MarkDown'))
 
@@ -246,9 +535,10 @@ async function pushScheduledTodo(context, cfg, todo) {
   if (!ts || !Number.isFinite(ts)) throw new Error('BAD_TIME')
 
   const url = 'https://www.xxtui.com/scheduled/reminder/' + encodeURIComponent(key)
-  const title = '[TODO] ' + String(todo.title || '').trim()
+  const text = String(todo && todo.title || '').trim()
+  const title = todoStatusTag(todo) + ' ' + (text || '待办事项')
   const lines = []
-  const mainText = String(todo.title || '').trim() || title
+  const mainText = text || title
   lines.push('提醒内容:')
   lines.push(mainText)
   // 追加具体提醒时间
@@ -265,6 +555,8 @@ async function pushScheduledTodo(context, cfg, todo) {
     // 时间格式失败时忽略
   }
   lines.push('')
+  lines.push('状态：' + ((todo && todo.done) ? '已完成' : '未完成'))
+  lines.push('')
   lines.push('来源：' + ((cfg && cfg.from) || '飞速MarkDown'))
 
   const payload = {
@@ -280,6 +572,165 @@ async function pushScheduledTodo(context, cfg, todo) {
   })
 }
 
+async function runPushFlow(context, cfg, type) {
+  if (!context || !context.getEditorValue) {
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('当前环境不支持读取待办内容', 'err', 2600)
+    }
+    return
+  }
+
+  const content = context.getEditorValue()
+  const allTodos = extractTodos(content)
+  if (!allTodos.length) {
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('当前文档没有待办（- [ ] 或 - [x] 语法）', 'err', 2600)
+    }
+    return
+  }
+
+  const filtered = filterTodosByType(allTodos, type)
+  if (!filtered.length) {
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('没有符合筛选条件的待办', 'err', 2600)
+    }
+    return
+  }
+
+  const label = describeFilter(type)
+  const confirmText = '检测到 ' + filtered.length + ' 条' + label + '待办，是否推送到 xxtui？（beta）'
+  if (context && context.ui && context.ui.confirm) {
+    const okConfirm = await context.ui.confirm(confirmText)
+    if (!okConfirm) return
+  }
+
+  let okCount = 0
+  let failCount = 0
+  for (const todo of filtered) {
+    try {
+      await pushInstantTodo(context, cfg, todo)
+      okCount++
+    } catch {
+      failCount++
+    }
+  }
+
+  const msg = failCount
+    ? 'xxtui 推送完成：成功 ' + okCount + ' 条，失败 ' + failCount + ' 条（beta）'
+    : 'xxtui 推送完成：成功 ' + okCount + ' 条（beta）'
+  if (context && context.ui && context.ui.notice) {
+    context.ui.notice(msg, failCount ? 'err' : 'ok', 4000)
+  }
+}
+
+async function runReminderFlow(context, cfg) {
+  if (!context || !context.getEditorValue) {
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('当前环境不支持读取待办内容', 'err', 2600)
+    }
+    return
+  }
+
+  const content = context.getEditorValue()
+  const allTodos = extractTodos(content)
+  if (!allTodos.length) {
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('当前文档没有待办（- [ ] 或 - [x] 语法）', 'err', 2600)
+    }
+    return
+  }
+  const pending = allTodos.filter((item) => item && !item.done)
+  if (!pending.length) {
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('当前文档没有未完成的待办', 'err', 2600)
+    }
+    return
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000)
+  const scheduled = []
+  for (const todo of pending) {
+    const parsed = parseTodoTime(todo.title, nowSec)
+    if (!parsed) continue
+    scheduled.push({
+      ...todo,
+      title: parsed.title,
+      reminderTime: parsed.reminderTime
+    })
+  }
+
+  if (!scheduled.length) {
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('未找到包含有效时间（@...）的未完成待办，无法创建定时提醒（beta）', 'err', 3600)
+    }
+    return
+  }
+
+  if (context && context.ui && context.ui.confirm) {
+    const okConfirm = await context.ui.confirm(
+      '检测到 ' + scheduled.length + ' 条包含时间的未完成待办，是否创建 xxtui 定时提醒？（beta）'
+    )
+    if (!okConfirm) return
+  }
+
+  let okCount = 0
+  let failCount = 0
+  for (const todo of scheduled) {
+    try {
+      await pushScheduledTodo(context, cfg, todo)
+      okCount++
+    } catch {
+      failCount++
+    }
+  }
+
+  const msgSchedule = failCount
+    ? 'xxtui 定时提醒创建完成：成功 ' + okCount + ' 条，失败 ' + failCount + ' 条（beta）'
+    : 'xxtui 定时提醒创建完成：成功 ' + okCount + ' 条（beta）'
+  if (context && context.ui && context.ui.notice) {
+    context.ui.notice(msgSchedule, failCount ? 'err' : 'ok', 4000)
+  }
+}
+
+async function handleMenuAction(context, action) {
+  try {
+    if (!context || !context.http || !context.http.fetch) {
+      if (context && context.ui && context.ui.notice) {
+        context.ui.notice('当前环境不支持待办推送所需接口', 'err', 2600)
+      }
+      return
+    }
+
+    const cfg = await loadCfg(context)
+    const key = String(cfg.apiKey || '').trim()
+    if (!key) {
+      if (context && context.ui && context.ui.notice) {
+        context.ui.notice('请先在插件设置中配置 xxtui API Key（beta）', 'err', 3200)
+      }
+      return
+    }
+
+    if (action === MENU_ACTIONS.CREATE_REMINDER) {
+      await runReminderFlow(context, cfg)
+      return
+    }
+
+    if (
+      action === MENU_ACTIONS.PUSH_ALL ||
+      action === MENU_ACTIONS.PUSH_DONE ||
+      action === MENU_ACTIONS.PUSH_TODO
+    ) {
+      await runPushFlow(context, cfg, action)
+      return
+    }
+  } catch (e) {
+    const msg = e && e.message ? String(e.message) : String(e || '未知错误')
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('xxtui 待办操作失败：' + msg + '（beta）', 'err', 4000)
+    }
+  }
+}
+
 export function activate(context) {
   // 检查必要能力是否存在
   if (!context || !context.getEditorValue || !context.http || !context.http.fetch) {
@@ -289,93 +740,23 @@ export function activate(context) {
     return
   }
 
+  try {
+    ensurePointerTracker()
+  } catch {
+    // ignore pointer tracker failure
+  }
+
   context.addMenuItem({
-    label: '代办',
-    title: '扫描当前文档的未完成待办并推送到 xxtui（beta）',
-    onClick: async () => {
+    label: '待办',
+    title: '打开下拉菜单，推送或创建 xxtui 提醒（beta）',
+    onClick: () => {
       try {
-        const cfg = await loadCfg(context)
-        const key = String(cfg.apiKey || '').trim()
-        if (!key) {
-          context.ui.notice('请先在插件设置中配置 xxtui API Key（beta）', 'err', 3200)
-          return
-        }
-
-        const content = context.getEditorValue()
-        const todos = extractTodos(content)
-        if (!todos.length) {
-          context.ui.notice('当前文档没有未完成的待办（- [ ] 语法）', 'err', 2400)
-          return
-        }
-
-        const mode = String(cfg.mode || 'scheduled')
-        const nowSec = Math.floor(Date.now() / 1000)
-
-        if (mode === 'scheduled') {
-          const scheduled = []
-          for (const todo of todos) {
-            const parsed = parseTodoTime(todo.title, nowSec)
-            if (!parsed) continue
-            scheduled.push({
-              ...todo,
-              title: parsed.title,
-              reminderTime: parsed.reminderTime
-            })
-          }
-
-          if (!scheduled.length) {
-            context.ui.notice('未找到包含有效时间（@...）的待办，无法创建定时提醒（beta）', 'err', 3600)
-            return
-          }
-
-          const okConfirm = await context.ui.confirm(
-            '检测到 ' + scheduled.length + ' 条包含时间的待办，是否创建 xxtui 定时提醒？（beta）'
-          )
-          if (!okConfirm) return
-
-          let okCount = 0
-          let failCount = 0
-
-          for (const todo of scheduled) {
-            try {
-              await pushScheduledTodo(context, cfg, todo)
-              okCount++
-            } catch {
-              failCount++
-            }
-          }
-
-          const msgSchedule = failCount
-            ? 'xxtui 定时提醒创建完成：成功 ' + okCount + ' 条，失败 ' + failCount + ' 条（beta）'
-            : 'xxtui 定时提醒创建完成：成功 ' + okCount + ' 条（beta）'
-          context.ui.notice(msgSchedule, failCount ? 'err' : 'ok', 4000)
-          return
-        }
-
-        const okConfirm = await context.ui.confirm(
-          '检测到 ' + todos.length + ' 条未完成待办，是否立即推送到 xxtui？（beta）'
-        )
-        if (!okConfirm) return
-
-        let okCount = 0
-        let failCount = 0
-
-        for (const todo of todos) {
-          try {
-            await pushInstantTodo(context, cfg, todo)
-            okCount++
-          } catch {
-            failCount++
-          }
-        }
-
-        const msgInstant = failCount
-          ? 'xxtui 推送完成：成功 ' + okCount + ' 条，失败 ' + failCount + ' 条（beta）'
-          : 'xxtui 推送完成：成功 ' + okCount + ' 条（beta）'
-        context.ui.notice(msgInstant, failCount ? 'err' : 'ok', 4000)
+        toggleMenuOverlay(context)
       } catch (e) {
-        const msg = e && e.message ? String(e.message) : String(e || '未知错误')
-        context.ui.notice('xxtui 待办推送失败：' + msg + '（beta）', 'err', 4000)
+        if (context && context.ui && context.ui.notice) {
+          const msg = e && e.message ? String(e.message) : String(e || '未知错误')
+          context.ui.notice('无法打开操作菜单：' + msg, 'err', 3200)
+        }
       }
     }
   })
@@ -416,12 +797,11 @@ export async function openSettings(context) {
       '      <div>- [ ] 写周报 @2025-11-21 09:00</div>',
       '      <div>- [ ] 开会 @明天 下午3点</div>',
       '      <div>- [ ] 打电话 @2小时后</div>',
-      '      <div style="margin-top:4px;">定时模式仅处理包含 @时间 的待办。</div>',
+      '      <div style="margin-top:4px;">创建提醒仅处理包含 @时间 的未完成待办。</div>',
       '      <div style="margin-top:4px;"><a href="https://www.xxtui.com/" target="_blank" rel="noopener noreferrer">打开 xxtui 官网</a></div>',
       '    </div>',
       '  </div>',
       '  <div class="xt-row"><label>API Key</label><input id="xtui-set-key" type="text" placeholder="在 xxtui 渠道管理中查看 apikey"/></div>',
-      '  <div class="xt-row"><label>模式</label><select id="xtui-set-mode"><option value="scheduled">定时（含 @时间）</option><option value="instant">立即推送</option></select></div>',
       '  <div class="xt-row"><label>渠道 channel</label><input id="xtui-set-channel" type="text" placeholder="可留空，使用 xxtui 默认渠道"/></div>',
       '  <div class="xt-row"><label>来源 from</label><input id="xtui-set-from" type="text" placeholder="飞速MarkDown"/></div>',
       ' </div>',
@@ -433,12 +813,10 @@ export async function openSettings(context) {
     host.appendChild(overlay)
 
     const elKey = overlay.querySelector('#xtui-set-key')
-    const elMode = overlay.querySelector('#xtui-set-mode')
     const elChannel = overlay.querySelector('#xtui-set-channel')
     const elFrom = overlay.querySelector('#xtui-set-from')
 
     if (elKey) elKey.value = cfg.apiKey || ''
-    if (elMode) elMode.value = cfg.mode === 'instant' ? 'instant' : 'scheduled'
     if (elChannel) elChannel.value = cfg.channel || ''
     if (elFrom) elFrom.value = cfg.from || '飞速MarkDown'
 
@@ -468,13 +846,11 @@ export async function openSettings(context) {
     if (btnOk) {
       btnOk.addEventListener('click', async () => {
         const apiKey = elKey ? String(elKey.value || '').trim() : ''
-        const modeVal = elMode ? String(elMode.value || '').trim().toLowerCase() : 'scheduled'
         const channel = elChannel ? String(elChannel.value || '').trim() : ''
         const from = elFrom ? String(elFrom.value || '').trim() || '飞速MarkDown' : '飞速MarkDown'
 
         const nextCfg = {
           apiKey,
-          mode: modeVal === 'instant' ? 'instant' : 'scheduled',
           channel,
           from
         }
