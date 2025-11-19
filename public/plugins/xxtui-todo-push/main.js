@@ -493,25 +493,29 @@ function parseTodoTime(title, nowSec) {
 }
 
 // 立即推送单条待办到 xxtui
-async function pushInstantTodo(context, cfg, todo) {
+async function pushInstantBatch(context, cfg, todos, filterLabel) {
   const key = String(cfg && cfg.apiKey || '').trim()
   if (!key) throw new Error('NO_API_KEY')
+  const list = Array.isArray(todos) ? todos.filter(Boolean) : []
+  if (!list.length) throw new Error('NO_TODO')
 
+  const label = filterLabel || '全部'
   const url = 'https://www.xxtui.com/xxtui/' + encodeURIComponent(key)
-  const text = String(todo && todo.title || '').trim()
-  const title = todoStatusTag(todo) + ' ' + (text || '待办事项')
   const lines = []
-  const mainText = text || title
-  lines.push('提醒内容:')
-  lines.push(mainText)
+  lines.push('提醒列表（' + label + '，共 ' + list.length + ' 条）：')
   lines.push('')
-  lines.push('状态：' + ((todo && todo.done) ? '已完成' : '未完成'))
+  list.forEach((todo, idx) => {
+    const text = String(todo && todo.title || '').trim() || '待办事项'
+    const status = todoStatusTag(todo)
+    const lineNum = todo && todo.line ? '（行 ' + todo.line + '）' : ''
+    lines.push((idx + 1) + '. ' + status + ' ' + text + lineNum)
+  })
   lines.push('')
   lines.push('来源：' + ((cfg && cfg.from) || '飞速MarkDown'))
 
   const payload = {
     from: (cfg && cfg.from) || '飞速MarkDown',
-    title,
+    title: '[TODO] ' + label + ' · ' + list.length + ' 条',
     content: lines.join('\n'),
     channel: cfg && cfg.channel ? String(cfg.channel) : ''
   }
@@ -604,22 +608,16 @@ async function runPushFlow(context, cfg, type) {
     if (!okConfirm) return
   }
 
-  let okCount = 0
-  let failCount = 0
-  for (const todo of filtered) {
-    try {
-      await pushInstantTodo(context, cfg, todo)
-      okCount++
-    } catch {
-      failCount++
+  try {
+    await pushInstantBatch(context, cfg, filtered, label)
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('xxtui 推送完成：已发送 ' + filtered.length + ' 条（beta）', 'ok', 3600)
     }
-  }
-
-  const msg = failCount
-    ? 'xxtui 推送完成：成功 ' + okCount + ' 条，失败 ' + failCount + ' 条（beta）'
-    : 'xxtui 推送完成：成功 ' + okCount + ' 条（beta）'
-  if (context && context.ui && context.ui.notice) {
-    context.ui.notice(msg, failCount ? 'err' : 'ok', 4000)
+  } catch (err) {
+    const msg = err && err.message ? String(err.message) : '推送失败'
+    if (context && context.ui && context.ui.notice) {
+      context.ui.notice('xxtui 推送失败：' + msg + '（beta）', 'err', 3600)
+    }
   }
 }
 
