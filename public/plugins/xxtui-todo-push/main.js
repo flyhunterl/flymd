@@ -540,7 +540,7 @@ async function pushScheduledTodo(context, cfg, todo) {
 
   const url = 'https://www.xxtui.com/scheduled/reminder/' + encodeURIComponent(key)
   const text = String(todo && todo.title || '').trim()
-  const title = todoStatusTag(todo) + ' ' + (text || '待办事项')
+  const title = '[TODO] ' + (text || '待办事项')
   const lines = []
   const mainText = text || title
   lines.push('提醒内容:')
@@ -558,9 +558,6 @@ async function pushScheduledTodo(context, cfg, todo) {
   } catch {
     // 时间格式失败时忽略
   }
-  lines.push('')
-  lines.push('状态：' + ((todo && todo.done) ? '已完成' : '未完成'))
-  lines.push('')
   lines.push('来源：' + ((cfg && cfg.from) || '飞速MarkDown'))
 
   const payload = {
