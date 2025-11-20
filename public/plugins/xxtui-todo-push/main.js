@@ -23,13 +23,16 @@ const MENU_ACTIONS = {
   CREATE_REMINDER: 'create_reminder'
 }
 
-const MENU_OVERLAY_ID = 'xtui-todo-menu-overlay'
-const MENU_PANEL_ID = 'xtui-todo-menu-panel'
-let menuKeyHandler = null
-let pointerTrackerAttached = false
-let lastPointerPos = { x: 160, y: 80 }
-let lastAnchorRect = null
-let menuAnchorEl = null
+// 日志开关，置为 true 可在控制台查看调试信息
+const LOG_ENABLED = false
+const log = (...args) => {
+  if (!LOG_ENABLED) return
+  try {
+    console.log('[xxtui-todo]', ...args)
+  } catch {
+    // ignore console errors
+  }
+}
 
 // 注入设置面板样式（仿 AI 助手风格，简化版）
 function ensureXxtuiCss() {
@@ -61,257 +64,73 @@ function ensureXxtuiCss() {
   }
 }
 
-function ensureMenuCss() {
+// 自定义确认弹窗样式（与设置面板风格保持一致）
+function ensureConfirmCss() {
   try {
     const doc = window && window.document ? window.document : null
     if (!doc) return
-    if (doc.getElementById('xtui-todo-menu-style')) return
+    if (doc.getElementById('xtui-confirm-style')) return
     const css = doc.createElement('style')
-    css.id = 'xtui-todo-menu-style'
+    css.id = 'xtui-confirm-style'
     css.textContent = [
-      '#xtui-todo-menu-overlay{position:fixed;inset:0;background:transparent;z-index:2147483601;}',
-      '#xtui-todo-menu-panel{position:absolute;left:0;top:0;min-width:220px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 32px rgba(15,23,42,.2);font-family:-apple-system,BlinkMacSystemFont,system-ui;padding:6px 0;transition:opacity .12s ease,transform .12s ease;}',
-      '#xtui-todo-menu-panel button{width:100%;text-align:left;border:none;background:transparent;font-size:14px;color:#0f172a;padding:8px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;}',
-      '#xtui-todo-menu-panel button:hover{background:#f1f5f9;}',
-      '.xtui-menu-group{padding:2px 0;}',
-      '.xtui-menu-title{font-size:12px;color:#94a3b8;padding:4px 16px 6px;text-transform:uppercase;letter-spacing:.08em;}',
-      '.xtui-menu-divider{height:1px;background:#e2e8f0;margin:4px 0;}',
-      '.xtui-menu-note{font-size:12px;color:#94a3b8;margin-left:8px;}'
+      '#xtui-confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:2147483601;}',
+      '#xtui-confirm-dialog{width:360px;max-width:92vw;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,system-ui;}',
+      '#xtui-confirm-head{padding:12px 14px;font-weight:600;color:#0f172a;border-bottom:1px solid #e5e7eb;background:#f8fafc;}',
+      '#xtui-confirm-body{padding:14px;color:#111827;line-height:1.6;font-size:14px;}',
+      '#xtui-confirm-actions{display:flex;justify-content:flex-end;gap:10px;padding:12px 14px;border-top:1px solid #e5e7eb;background:#fafafa;}',
+      '#xtui-confirm-actions button{padding:6px 12px;border-radius:8px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;font-size:13px;cursor:pointer;}',
+      '#xtui-confirm-actions button.primary{background:#2563eb;border-color:#2563eb;color:#fff;}'
     ].join('')
     doc.head.appendChild(css)
-  } catch {
-    // 忽略样式错误
-  }
+  } catch {}
 }
 
-function ensurePointerTracker() {
-  try {
-    if (pointerTrackerAttached) return
-    const doc = window && window.document ? window.document : null
-    if (!doc) return
-    const handler = (e) => {
-      if (!e) return
-      const x = Number.isFinite(e.clientX) ? e.clientX : lastPointerPos.x
-      const y = Number.isFinite(e.clientY) ? e.clientY : lastPointerPos.y
-      lastPointerPos = { x, y }
-    }
-    doc.addEventListener('pointerdown', handler, { passive: true })
-    doc.addEventListener('pointermove', handler, { passive: true })
-    pointerTrackerAttached = true
-  } catch {
-    // ignore
-  }
-}
+// 自定义确认弹窗，返回 Promise<boolean>
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    try {
+      const doc = window && window.document ? window.document : null
+      if (!doc) throw new Error('NO_DOM')
+      ensureConfirmCss()
 
-function captureAnchorRect(el) {
-  try {
-    if (!el || typeof el.getBoundingClientRect !== 'function') return null
-    const rect = el.getBoundingClientRect()
-    if (!rect) return null
-    const { left, top, right, bottom, width, height } = rect
-    if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(width)) return null
-    const data = { left, top, right, bottom, width, height }
-    lastAnchorRect = data
-    return data
-  } catch {
-    return null
-  }
-}
+      const overlay = doc.createElement('div')
+      overlay.id = 'xtui-confirm-overlay'
+      overlay.innerHTML = [
+        '<div id="xtui-confirm-dialog">',
+        ' <div id="xtui-confirm-head">确认操作</div>',
+        ' <div id="xtui-confirm-body"></div>',
+        ' <div id="xtui-confirm-actions">',
+        '   <button id="xtui-confirm-cancel">取消</button>',
+        '   <button class="primary" id="xtui-confirm-ok">确定</button>',
+        ' </div>',
+        '</div>'
+      ].join('')
 
-function getAnchorRect(doc) {
-  const anchor = ensureMenuAnchor(doc)
-  if (anchor) {
-    const rect = captureAnchorRect(anchor)
-    if (rect) return rect
-  }
-  const fallback = captureAnchorRect(doc && doc.activeElement ? doc.activeElement : null)
-  if (fallback) return fallback
-  return lastAnchorRect
-}
+      const body = overlay.querySelector('#xtui-confirm-body')
+      if (body) body.textContent = String(message || '')
 
-function findMenuAnchorElement(doc) {
-  if (!doc || !doc.querySelectorAll) return null
-  const candidates = doc.querySelectorAll('button, [role="button"], a[role="menuitem"], .menu-item')
-  for (const node of candidates) {
-    if (!node || typeof node.closest !== 'function') continue
-    if (node.closest('#' + MENU_OVERLAY_ID)) continue
-    const title = (node.getAttribute && node.getAttribute('title')) || ''
-    const txt = (node.textContent || '').trim()
-    if (!txt && !title) continue
-    if ((txt && txt.startsWith('待办')) || (title && title.includes('待办'))) {
-      return node
-    }
-  }
-  return null
-}
+      const host = doc.body || doc.documentElement
+      host.appendChild(overlay)
 
-function ensureMenuAnchor(doc) {
-  try {
-    if (menuAnchorEl && doc && doc.contains && doc.contains(menuAnchorEl)) {
-      return menuAnchorEl
-    }
-    const found = findMenuAnchorElement(doc)
-    if (found) {
-      menuAnchorEl = found
-      captureAnchorRect(found)
-      return found
-    }
-  } catch {
-    // ignore
-  }
-  return null
-}
-
-function positionMenuPanel(panel, anchorRect) {
-  try {
-    if (!panel) return
-    const doc = window && window.document ? window.document : null
-    if (!doc) return
-    const viewportW = doc.documentElement && doc.documentElement.clientWidth
-      ? doc.documentElement.clientWidth
-      : (window && window.innerWidth) || 1280
-    const viewportH = doc.documentElement && doc.documentElement.clientHeight
-      ? doc.documentElement.clientHeight
-      : (window && window.innerHeight) || 720
-    const padding = 12
-
-    panel.style.opacity = '0'
-    panel.style.transform = 'translateY(-4px)'
-    panel.style.pointerEvents = 'none'
-
-    requestAnimationFrame(() => {
-      const rect = panel.getBoundingClientRect()
-      const panelW = rect.width || 220
-      const panelH = rect.height || 180
-      let left
-      let top
-
-      if (anchorRect && Number.isFinite(anchorRect.left) && Number.isFinite(anchorRect.width)) {
-        left = anchorRect.left + (anchorRect.width / 2) - 20
-        const anchorBottom = Number.isFinite(anchorRect.bottom)
-          ? anchorRect.bottom
-          : (anchorRect.top || 0) + (anchorRect.height || 0)
-        top = anchorBottom + 8
-      } else {
-        const pointerX = Math.min(Math.max(lastPointerPos.x || viewportW / 2, padding), viewportW - padding)
-        const pointerY = Math.min(Math.max(lastPointerPos.y || 48, padding), viewportH - padding)
-        left = pointerX - panelW / 2
-        top = pointerY + 12
+      const cleanup = (ret) => {
+        try { overlay.remove() } catch {}
+        resolve(!!ret)
       }
 
-      if (left < padding) left = padding
-      if (left + panelW + padding > viewportW) left = viewportW - panelW - padding
-      if (top + panelH + padding > viewportH) top = viewportH - panelH - padding
-      if (top < padding) top = padding
-
-      panel.style.left = left + 'px'
-      panel.style.top = top + 'px'
-      panel.style.opacity = '1'
-      panel.style.transform = 'translateY(0)'
-      panel.style.pointerEvents = 'auto'
-    })
-  } catch {
-    // ignore
-  }
-}
-
-function removeMenuOverlay() {
-  try {
-    const doc = window && window.document ? window.document : null
-    if (!doc) return
-    const overlay = doc.getElementById(MENU_OVERLAY_ID)
-    if (overlay) {
-      overlay.remove()
-    }
-    if (menuKeyHandler) {
-      doc.removeEventListener('keydown', menuKeyHandler)
-      menuKeyHandler = null
-    }
-  } catch {
-    // ignore
-  }
-}
-
-function showMenuOverlay(context) {
-  try {
-    const doc = window && window.document ? window.document : null
-    if (!doc) {
-      Promise.resolve(handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)).catch(() => {})
-      return
-    }
-    ensureMenuCss()
-    ensurePointerTracker()
-    const anchorRect = getAnchorRect(doc)
-    removeMenuOverlay()
-    const overlay = doc.createElement('div')
-    overlay.id = MENU_OVERLAY_ID
-    const inner = [
-      '<div id="' + MENU_PANEL_ID + '">',
-      ' <div class="xtui-menu-group">',
-      '  <div class="xtui-menu-title">推送</div>',
-      '  <button data-action="' + MENU_ACTIONS.PUSH_ALL + '">全部<span class="xtui-menu-note">含已完成/未完成</span></button>',
-      '  <button data-action="' + MENU_ACTIONS.PUSH_DONE + '">已完成</button>',
-      '  <button data-action="' + MENU_ACTIONS.PUSH_TODO + '">未完成</button>',
-      ' </div>',
-      ' <div class="xtui-menu-divider"></div>',
-      ' <div class="xtui-menu-group">',
-      '  <button data-action="' + MENU_ACTIONS.CREATE_REMINDER + '">创建提醒<span class="xtui-menu-note">@时间</span></button>',
-      ' </div>',
-      '</div>'
-    ].join('')
-    overlay.innerHTML = inner
-    doc.body.appendChild(overlay)
-
-    const panel = overlay.querySelector('#' + MENU_PANEL_ID)
-    if (panel) {
-      positionMenuPanel(panel, anchorRect)
-    }
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) removeMenuOverlay()
-    })
-
-    const buttons = overlay.querySelectorAll('button[data-action]')
-    buttons.forEach((btn) => {
-      btn.addEventListener('click', (ev) => {
-        ev.preventDefault()
-        ev.stopPropagation()
-        const action = btn.getAttribute('data-action')
-        removeMenuOverlay()
-        if (action) {
-          Promise.resolve(handleMenuAction(context, action)).catch(() => {})
-        }
-      })
-    })
-
-    menuKeyHandler = (e) => {
-      if (e.key === 'Escape') {
-        removeMenuOverlay()
+      const btnOk = overlay.querySelector('#xtui-confirm-ok')
+      const btnCancel = overlay.querySelector('#xtui-confirm-cancel')
+      if (btnOk) btnOk.addEventListener('click', () => cleanup(true))
+      if (btnCancel) btnCancel.addEventListener('click', () => cleanup(false))
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false) })
+      const onKey = (e) => {
+        if (e.key === 'Escape') cleanup(false)
+        if (e.key === 'Enter') cleanup(true)
       }
+      try { doc.addEventListener('keydown', onKey, { once: true }) } catch {}
+    } catch {
+      resolve(false)
     }
-    doc.addEventListener('keydown', menuKeyHandler)
-  } catch (error) {
-    removeMenuOverlay()
-    Promise.resolve(handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)).catch(() => {})
-  }
-}
-
-function toggleMenuOverlay(context) {
-  try {
-    const doc = window && window.document ? window.document : null
-    if (!doc) {
-      Promise.resolve(handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)).catch(() => {})
-      return
-    }
-    const overlay = doc.getElementById(MENU_OVERLAY_ID)
-    if (overlay) {
-      removeMenuOverlay()
-      return
-    }
-    showMenuOverlay(context)
-  } catch {
-    Promise.resolve(handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)).catch(() => {})
-  }
+  })
 }
 
 // 加载配置
@@ -320,7 +139,9 @@ async function loadCfg(context) {
     if (!context || !context.storage || !context.storage.get) return { ...DEFAULT_CFG }
     const raw = await context.storage.get(CFG_KEY)
     if (!raw || typeof raw !== 'object') return { ...DEFAULT_CFG }
-    return { ...DEFAULT_CFG, ...raw }
+    const merged = { ...DEFAULT_CFG, ...raw }
+    log('配置已加载', { hasKey: !!merged.apiKey, from: merged.from, channel: !!merged.channel })
+    return merged
   } catch {
     return { ...DEFAULT_CFG }
   }
@@ -524,11 +345,19 @@ async function pushInstantBatch(context, cfg, todos, filterLabel) {
     delete payload.channel
   }
 
-  await context.http.fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
+  log('批量推送发送', { label, count: list.length, channel: payload.channel ? '自定义渠道' : '默认渠道' })
+
+  try {
+    await context.http.fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    log('批量推送成功')
+  } catch (err) {
+    log('批量推送出错', err)
+    throw err
+  }
 }
 
 // 创建定时提醒
@@ -566,14 +395,24 @@ async function pushScheduledTodo(context, cfg, todo) {
     reminderTime: ts
   }
 
-  await context.http.fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
+  log('定时提醒发送', { title, ts })
+
+  try {
+    await context.http.fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    log('定时提醒成功')
+  } catch (err) {
+    log('定时提醒出错', err)
+    throw err
+  }
 }
 
 async function runPushFlow(context, cfg, type) {
+  log('开始推送流程', { type })
+
   if (!context || !context.getEditorValue) {
     if (context && context.ui && context.ui.notice) {
       context.ui.notice('当前环境不支持读取待办内容', 'err', 2600)
@@ -583,6 +422,7 @@ async function runPushFlow(context, cfg, type) {
 
   const content = context.getEditorValue()
   const allTodos = extractTodos(content)
+  log('解析到待办数量', allTodos.length)
   if (!allTodos.length) {
     if (context && context.ui && context.ui.notice) {
       context.ui.notice('当前文档没有待办（- [ ] 或 - [x] 语法）', 'err', 2600)
@@ -600,10 +440,8 @@ async function runPushFlow(context, cfg, type) {
 
   const label = describeFilter(type)
   const confirmText = '检测到 ' + filtered.length + ' 条' + label + '待办，是否推送到 xxtui？（beta）'
-  if (context && context.ui && context.ui.confirm) {
-    const okConfirm = await context.ui.confirm(confirmText)
-    if (!okConfirm) return
-  }
+  const okConfirm = await showConfirm(confirmText)
+  if (!okConfirm) return
 
   try {
     await pushInstantBatch(context, cfg, filtered, label)
@@ -619,6 +457,8 @@ async function runPushFlow(context, cfg, type) {
 }
 
 async function runReminderFlow(context, cfg) {
+  log('开始提醒流程')
+
   if (!context || !context.getEditorValue) {
     if (context && context.ui && context.ui.notice) {
       context.ui.notice('当前环境不支持读取待办内容', 'err', 2600)
@@ -628,6 +468,7 @@ async function runReminderFlow(context, cfg) {
 
   const content = context.getEditorValue()
   const allTodos = extractTodos(content)
+  log('解析到待办数量（提醒）', allTodos.length)
   if (!allTodos.length) {
     if (context && context.ui && context.ui.notice) {
       context.ui.notice('当前文档没有待办（- [ ] 或 - [x] 语法）', 'err', 2600)
@@ -654,6 +495,8 @@ async function runReminderFlow(context, cfg) {
     })
   }
 
+  log('可创建提醒的待办数', scheduled.length)
+
   if (!scheduled.length) {
     if (context && context.ui && context.ui.notice) {
       context.ui.notice('未找到包含有效时间（@...）的未完成待办，无法创建定时提醒（beta）', 'err', 3600)
@@ -661,12 +504,10 @@ async function runReminderFlow(context, cfg) {
     return
   }
 
-  if (context && context.ui && context.ui.confirm) {
-    const okConfirm = await context.ui.confirm(
-      '检测到 ' + scheduled.length + ' 条包含时间的未完成待办，是否创建 xxtui 定时提醒？（beta）'
-    )
-    if (!okConfirm) return
-  }
+  const okConfirm = await showConfirm(
+    '检测到 ' + scheduled.length + ' 条包含时间的未完成待办，是否创建 xxtui 定时提醒？（beta）'
+  )
+  if (!okConfirm) return
 
   let okCount = 0
   let failCount = 0
@@ -689,6 +530,8 @@ async function runReminderFlow(context, cfg) {
 
 async function handleMenuAction(context, action) {
   try {
+    log('处理菜单动作', action)
+
     if (!context || !context.http || !context.http.fetch) {
       if (context && context.ui && context.ui.notice) {
         context.ui.notice('当前环境不支持待办推送所需接口', 'err', 2600)
@@ -723,6 +566,7 @@ async function handleMenuAction(context, action) {
     if (context && context.ui && context.ui.notice) {
       context.ui.notice('xxtui 待办操作失败：' + msg + '（beta）', 'err', 4000)
     }
+    log('处理菜单动作异常', e)
   }
 }
 
@@ -735,26 +579,87 @@ export function activate(context) {
     return
   }
 
-  try {
-    ensurePointerTracker()
-  } catch {
-    // ignore pointer tracker failure
-  }
-
+  // 顶部菜单
   context.addMenuItem({
     label: '待办',
-    title: '打开下拉菜单，推送或创建 xxtui 提醒（beta）',
-    onClick: () => {
-      try {
-        toggleMenuOverlay(context)
-      } catch (e) {
-        if (context && context.ui && context.ui.notice) {
-          const msg = e && e.message ? String(e.message) : String(e || '未知错误')
-          context.ui.notice('无法打开操作菜单：' + msg, 'err', 3200)
-        }
+    title: '推送或创建 xxtui 提醒（beta）',
+    children: [
+      { type: 'group', label: '推送' },
+      {
+        label: '全部',
+        note: '含已完成/未完成',
+        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_ALL)
+      },
+      {
+        label: '已完成',
+        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_DONE)
+      },
+      {
+        label: '未完成',
+        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)
+      },
+      { type: 'divider' },
+      { type: 'group', label: '提醒' },
+      {
+        label: '创建提醒',
+        note: '@时间',
+        onClick: () => handleMenuAction(context, MENU_ACTIONS.CREATE_REMINDER)
       }
-    }
+    ]
   })
+
+    // 1. 简单的文本转换菜单项（仅在有选中文本时显示）
+    context.addContextMenuItem({
+        label: '转换为大写',
+        icon: '🔤',
+        condition: (ctx) => ctx.selectedText.length > 0,
+        onClick: (ctx) => {
+            const upperText = ctx.selectedText.toUpperCase();
+            context.replaceRange(
+                context.getSelection().start,
+                context.getSelection().end,
+                upperText
+            );
+            context.ui.notice('已转换为大写', 'ok', 1500);
+        }
+    });
+
+  // 右键菜单入口：同样提供推送/提醒的快捷操作
+  try {
+    if (context.addContextMenuItem) {
+      const condition = (ctx) => !ctx || ctx.mode === 'edit' || ctx.mode === 'wysiwyg'
+
+      context.addContextMenuItem({
+        label: '推送全部',
+        icon: '📝',
+        condition,
+        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_ALL)
+      })
+
+      context.addContextMenuItem({
+        label: '推送已完成',
+        icon: '✅',
+        condition,
+        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_DONE)
+      })
+
+      context.addContextMenuItem({
+        label: '推送未完成',
+        icon: '⭕',
+        condition,
+        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)
+      })
+
+      context.addContextMenuItem({
+        label: '创建提醒 (@时间)',
+        icon: '⏰',
+        condition,
+        onClick: () => handleMenuAction(context, MENU_ACTIONS.CREATE_REMINDER)
+      })
+    }
+  } catch (e) {
+    log('右键菜单注册失败', e && e.message ? e.message : e)
+  }
 }
 
 export async function openSettings(context) {
