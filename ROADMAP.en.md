@@ -2,6 +2,14 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.3.6
+- Added: Built-in `xxtui todo push` extension to send todos from your document to xxtui in one click, with follow-up improvements to the todo menu UX and batched push behavior.
+- Added: Extension runtime now exposes a right-click menu API, along with a demo extension that showcases multiple menu items, nested submenus, and custom icons.
+- Added: Extension marketplace now lets you manually choose the install/update channel (GitHub or official site), with the other side automatically used as a fallback to stay robust under different network conditions.
+- Added: Dropdown submenu API for extensions so plugins can build grouped menus and more complex action entries.
+- Improved: Reworked the Edit mode padding and width control logic, aligning width tuning behavior between Edit and Reading modes so finding a comfortable reading width feels more natural.
+- Fixed: Cleaning up extension-registered menus on uninstall to avoid stale or duplicated menu entries.
+
 ## Update v0.3.5
 - Added: In Edit mode, pasting a URL with `Ctrl+V` now fetches the page `<title>` and expands it into a `[page title](https://...)` Markdown link, while `Ctrl+Shift+V` always pastes plain text.
 - Fixed: When pasting from HTML sources, the editor no longer inserts both raw text and converted Markdown; `Ctrl+V` now only keeps the converted Markdown content.

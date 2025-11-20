@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.3.5-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.3.6-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-NonCommercial-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 ![GitHub Downloads](https://img.shields.io/github/downloads/flyhunterl/flymd/total)
@@ -47,6 +47,7 @@
   - 原生低延迟：保留 `<textarea>` 管线，中文输入法合成友好，智能成对补全括号/引号，不干扰输入（编辑模式）
   - 统一缩进与多行操作：`Tab` 在编辑/WYSIWYG 两种模式下表现一致
   - 常用格式化：`Ctrl+B` 加粗、`Ctrl+I` 斜体、`Ctrl+K` 插入链接；精确的行列/光标位置反馈
+  - 编辑/阅读宽度调节：按住 `Shift` + 鼠标滚轮 调整编辑区/阅读区宽度，长文阅读时更容易找到舒适宽度
   - 所见模式使用`Ctrl+Enter`跳出代码区  
   **编辑模式使用标准语法，空格X2+回车才会触发提行。未使用标准语法切换到所见模式提行会失效。阅读模式不受影响**  
   **自动补全仅编辑模式生效**  

@@ -1,6 +1,6 @@
 {
   "name": "flymd",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "license": "LicenseRef-flyMD-NC-1.0",
   "type": "module",

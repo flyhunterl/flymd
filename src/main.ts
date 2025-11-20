@@ -2278,8 +2278,6 @@ try {
       }
       // Shift + 滚轮：调整阅读/所见最大宽度
       if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        // 仅在阅读/所见模式下响应，编辑模式下保持默认滚动行为
-        if (mode !== 'preview' && !wysiwyg && !wysiwygV2Active) return
         if (!dy) return
         e.preventDefault()
         const cur = getPreviewWidth()
@@ -8375,13 +8373,37 @@ async function fetchTextSmart(url: string): Promise<string> {
   return await r2.text()
 }
 
-
-// 插件市场：获取索引地址（优先级：Store > 环境变量 > 默认）
+// 插件市场：获取 GitHub 索引地址（优先级：Store > 环境变量 > 默认）
 async function getMarketUrl(): Promise<string | null> {
   try { if (store) { const u = await store.get('pluginMarket:url'); if (typeof u === 'string' && /^https?:\/\//i.test(u)) return u } } catch {}
   try { const u = (import.meta as any)?.env?.FLYMD_PLUGIN_MARKET_URL; if (typeof u === 'string' && /^https?:\/\//i.test(u)) return u } catch {}
   // 默认索引（占位，仓库可替换为实际地址）
   return 'https://raw.githubusercontent.com/flyhunterl/flymd/main/index.json'
+}
+
+// 插件市场渠道：GitHub / 官网
+type PluginMarketChannel = 'github' | 'official'
+
+// 读取当前渠道（默认 GitHub 优先，以保持向后兼容）
+async function getMarketChannel(): Promise<PluginMarketChannel> {
+  try {
+    if (!store) return 'github'
+    const v = await store.get('pluginMarket:channel')
+    if (v === 'official') return 'official'
+    return 'github'
+  } catch {
+    return 'github'
+  }
+}
+
+// 持久化渠道选择并清空缓存
+async function setMarketChannel(channel: PluginMarketChannel): Promise<void> {
+  try {
+    if (!store) return
+    await store.set('pluginMarket:channel', channel)
+    await store.set('pluginMarket:cache', null as any)
+    await store.save()
+  } catch {}
 }
 
 // 加载“可安装的扩展”索引（带缓存与多源回退：GitHub → 官网 → 本地文件 → 内置兜底）
@@ -8399,15 +8421,21 @@ async function loadInstallablePlugins(force = false): Promise<InstallableItem[]>
 
   // 2) 远程索引
   try {
-    const primary = await getMarketUrl()
-    const fallback = 'https://flymd.llingfei.com/plugins/index.json'
+    const githubUrl = await getMarketUrl()
+    const officialUrl = 'https://flymd.llingfei.com/plugins/index.json'
+    const channel = await getMarketChannel()
     const tried: string[] = []
     let text: string | null = null
     let ttlMs = 3600_000
 
     const urls: string[] = []
-    if (primary) urls.push(primary)
-    if (!urls.includes(fallback)) urls.push(fallback)
+    if (channel === 'official') {
+      if (officialUrl) urls.push(officialUrl)
+      if (githubUrl && !urls.includes(githubUrl)) urls.push(githubUrl)
+    } else {
+      if (githubUrl) urls.push(githubUrl)
+      if (officialUrl && !urls.includes(officialUrl)) urls.push(officialUrl)
+    }
 
     for (const u of urls) {
       if (!u) continue
@@ -8807,6 +8835,43 @@ async function refreshExtensionsUI(): Promise<void> {
   const hd = document.createElement('div'); hd.className = 'ext-subtitle'
   const hdText = document.createElement('span'); hdText.textContent = t('ext.available')
   hd.appendChild(hdText)
+
+  // 渠道选择：GitHub / 官网
+  const channelWrap = document.createElement('div')
+  channelWrap.className = 'ext-market-channel'
+  const channelLabel = document.createElement('span')
+  channelLabel.className = 'ext-market-channel-label'
+  channelLabel.textContent = t('ext.market.channel')
+  const channelSelect = document.createElement('select')
+  channelSelect.className = 'ext-market-channel-select'
+  const optGithub = document.createElement('option')
+  optGithub.value = 'github'
+  optGithub.textContent = t('ext.market.channel.github')
+  const optOfficial = document.createElement('option')
+  optOfficial.value = 'official'
+  optOfficial.textContent = t('ext.market.channel.official')
+  channelSelect.appendChild(optGithub)
+  channelSelect.appendChild(optOfficial)
+  ;(async () => {
+    try {
+      const ch = await getMarketChannel()
+      channelSelect.value = ch === 'official' ? 'official' : 'github'
+    } catch {
+      channelSelect.value = 'github'
+    }
+  })()
+  channelSelect.addEventListener('change', () => {
+    const v = channelSelect.value === 'official' ? 'official' : 'github'
+    void (async () => {
+      await setMarketChannel(v)
+      await loadInstallablePlugins(true)
+      await refreshExtensionsUI()
+    })()
+  })
+  channelWrap.appendChild(channelLabel)
+  channelWrap.appendChild(channelSelect)
+  hd.appendChild(channelWrap)
+
   const btnRefresh = document.createElement('button'); btnRefresh.className = 'btn'; btnRefresh.textContent = t('ext.refresh')
   btnRefresh.addEventListener('click', async () => {
     try {

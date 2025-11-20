@@ -1,7 +1,7 @@
 {
   "id": "ai-assistant",
   "name": "AI 写作助手",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "author": "flyMD",
   "description": "多供应商 AI 写作助手",
   "homepage": "https://github.com/flyhunterl/flymd",

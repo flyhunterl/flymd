@@ -14,7 +14,7 @@ const DEFAULT_CFG = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
   model: 'gpt-4o-mini',
-  win: { x: 60, y: 60, w: 300, h: 440 },
+  win: { x: 60, y: 60, w: 400, h: 440 },
   dock: 'left', // 'left'=左侧停靠；'right'=右侧停靠；false=浮动窗口
   limits: { maxCtxChars: 6000 },
   theme: 'auto'
@@ -27,6 +27,7 @@ let __AI_SENDING__ = false
 let __AI_LAST_REPLY__ = ''
 let __AI_TOGGLE_LOCK__ = false
 let __AI_MQ_BOUND__ = false
+let __AI_MENU_ITEM__ = null // 保存菜单项引用，用于卸载时清理
 
 // ========== 工具函数 ==========
 async function loadCfg(context) {
@@ -53,6 +54,9 @@ function gid(){ return 's_' + Math.random().toString(36).slice(2,10) }
 
 function clampCtx(s, n) { const t = String(s || ''); return t.length > n ? t.slice(t.length - n) : t }
 
+// 最小宽度常量
+const MIN_WIDTH = 400
+
 function DOC(){ return (window.__AI_DOC__ || document) }
 function WIN(){ return (window.__AI_WIN__ || window) }
 function el(id) { return DOC().getElementById(id) }
@@ -68,8 +72,8 @@ function ensureCss() {
     // 容器（浅色友好 UI）；默认走 dock-left 模式（伪装侧栏）
     '#ai-assist-win{position:fixed;z-index:99999;background:#ffffff;color:#0f172a;',
     'border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.15);overflow:hidden}',
-    '#ai-assist-win.dock-left{left:0; top:0; height:100vh; width:380px; border-radius:0; border-left:none; border-top:none; border-bottom:none; box-shadow:none; border-right:1px solid #e5e7eb}',
-    '#ai-assist-win.dock-right{right:0; top:0; height:100vh; width:380px; border-radius:0; border-right:none; border-top:none; border-bottom:none; box-shadow:none; border-left:1px solid #e5e7eb}',
+    '#ai-assist-win.dock-left{left:0; top:0; height:100vh; width:400px; border-radius:0; border-left:none; border-top:none; border-bottom:none; box-shadow:none; border-right:1px solid #e5e7eb}',
+    '#ai-assist-win.dock-right{right:0; top:0; height:100vh; width:400px; border-radius:0; border-right:none; border-top:none; border-bottom:none; box-shadow:none; border-left:1px solid #e5e7eb}',
     // 头部与标题
     '#ai-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:move;',
     'background:linear-gradient(180deg,#f8fafc,#f1f5f9);border-bottom:1px solid #e5e7eb}',
@@ -83,21 +87,16 @@ function ensureCss() {
     '.msg.a{background:#f9fafb;border:1px solid #e5e7eb}',
     '#ai-input{display:flex;gap:8px;padding:10px;border-top:1px solid #e5e7eb;background:#fafafa}',
     '#ai-input textarea{flex:1;min-height:72px;background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:10px;padding:10px 12px}',
-    '#ai-input button{padding:8px 12px;border-radius:10px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a}',
+    '#ai-input .btn-group{display:flex;flex-direction:column;gap:6px;min-width:0}',
+    '#ai-input button{padding:6px 8px;border-radius:8px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}',
     '#ai-input button:hover{background:#f8fafc}',
-    '#ai-vresizer{position:absolute;right:0;top:0;width:6px;height:100%;cursor:ew-resize;background:transparent}',
+    '#ai-vresizer{position:absolute;right:0;top:0;width:8px;height:100%;cursor:ew-resize;background:transparent;z-index:10}',
+    '#ai-vresizer:hover{background:rgba(59,130,246,0.15)}',
     '#ai-resizer{position:absolute;right:0;bottom:0;width:12px;height:12px;cursor:nwse-resize;background:transparent}',
     '#ai-selects select,#ai-selects input{background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:8px;padding:6px 8px}',
     '#ai-toolbar .btn{padding:6px 10px;border-radius:8px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a}',
     '#ai-toolbar .btn:hover{background:#f8fafc}',
     '.small{font-size:12px;opacity:.85}',
-    // 推挤主编辑区：使用 CSS 变量 --ai-left 和 --ai-right
-    '.container.with-ai-left .editor, .container.with-ai-left .preview{ padding-left:var(--ai-left, 300px) }',
-    '.container.with-ai-left #md-wysiwyg-root{ left:var(--ai-left, 300px); width:calc(100% - var(--ai-left, 300px)) }',
-    '.container.wysiwyg-v2.with-ai-left #md-wysiwyg-root{ left:0; width:100% }',
-    '.container.with-ai-right .editor, .container.with-ai-right .preview{ padding-right:var(--ai-right, 300px) }',
-    '.container.with-ai-right #md-wysiwyg-root{ right:var(--ai-right, 300px); width:calc(100% - var(--ai-right, 300px)) }',
-    '.container.wysiwyg-v2.with-ai-right #md-wysiwyg-root{ right:0; width:100% }',
     '#ai-assist-win.dock-left #ai-resizer{display:none}',
     '#ai-assist-win.dock-right #ai-resizer{display:none}',
     '#ai-assist-win:not(.dock-left):not(.dock-right) #ai-vresizer{display:none}',
@@ -136,6 +135,9 @@ function ensureCss() {
     '#ai-assist-win.dark #ai-toolbar select,#ai-assist-win.dark #ai-toolbar input{background:#0b1220;border:1px solid #1f2937;color:#e5e7eb}',
     '#ai-assist-win.dark #ai-head button{background:#111827;color:#e5e7eb;border:1px solid #1f2937}',
     '#ai-assist-win.dark #ai-head button:hover{background:#0f172a}',
+    '#ai-assist-win.dark #ai-vresizer:hover{background:rgba(96,165,250,0.2)}',
+    // 极窄宽度优化（<300px）
+    '@media (max-width: 320px) { #ai-input button { font-size: 11px; padding: 5px 6px; } }',
   ].join('\n')
   DOC().head.appendChild(css)
 }
@@ -156,15 +158,43 @@ function renderMsgs(root) {
   root.scrollTop = root.scrollHeight
 }
 
-function setDockPush(side){
+function setDockPush(side, width){
   try {
     const cont = DOC().querySelector('.container')
     if (!cont) return
-    // 移除所有停靠类
+    const winEl = el('ai-assist-win')
+    const detectSide = () => {
+      if (side === true) {
+        if (winEl?.classList?.contains('dock-left')) return 'left'
+        if (winEl?.classList?.contains('dock-right')) return 'right'
+        return false
+      }
+      return side
+    }
+    const actual = detectSide()
+    const rawWidth = (() => {
+      if (typeof width === 'number' && Number.isFinite(width)) return width
+      const inline = winEl ? parseInt(winEl.style.width) : NaN
+      if (Number.isFinite(inline)) return inline
+      const rect = winEl?.getBoundingClientRect()
+      if (rect && rect.width) return rect.width
+      return 0
+    })()
+    const resolvedWidth = Math.max(0, rawWidth || 0)
+    const fallbackW = MIN_WIDTH
     cont.classList.remove('with-ai-left', 'with-ai-right')
-    // 根据停靠位置添加相应的类
-    if (side === 'left') cont.classList.add('with-ai-left')
-    else if (side === 'right') cont.classList.add('with-ai-right')
+    if (actual === 'left') {
+      cont.classList.add('with-ai-left')
+      cont.style.setProperty('--ai-left', (resolvedWidth || fallbackW) + 'px')
+      cont.style.setProperty('--ai-right', '0px')
+    } else if (actual === 'right') {
+      cont.classList.add('with-ai-right')
+      cont.style.setProperty('--ai-right', (resolvedWidth || fallbackW) + 'px')
+      cont.style.setProperty('--ai-left', '0px')
+    } else {
+      cont.style.setProperty('--ai-left', '0px')
+      cont.style.setProperty('--ai-right', '0px')
+    }
   } catch {}
 }
 
@@ -173,19 +203,19 @@ function bindDockResize(context, el) {
     const rz = el.querySelector('#ai-vresizer')
     if (!rz) return
     let sx = 0, sw = 0, doing = false
-    rz.addEventListener('mousedown', (e) => { doing = true; sx = e.clientX; sw = parseInt(el.style.width)||300; e.preventDefault() })
+    rz.addEventListener('mousedown', (e) => { doing = true; sx = e.clientX; sw = parseInt(el.style.width)||MIN_WIDTH; e.preventDefault() })
     WIN().addEventListener('mousemove', (e) => {
       if (!doing) return
       // 右侧停靠时，拖动方向相反
       const isRight = el.classList.contains('dock-right')
       const delta = isRight ? (sx - e.clientX) : (e.clientX - sx)
-      const w = Math.max(300, sw + delta)
+      const w = Math.max(MIN_WIDTH, sw + delta)
       el.style.width = w + 'px'
       // 根据当前停靠位置更新推挤
       const dockSide = el.classList.contains('dock-left') ? 'left' : (el.classList.contains('dock-right') ? 'right' : false)
-      if (dockSide) setDockPush(dockSide)
+      if (dockSide) setDockPush(dockSide, w)
     })
-    WIN().addEventListener('mouseup', async () => { if (!doing) return; doing = false; try { const cfg = await loadCfg(context); cfg.win = cfg.win || {}; cfg.win.w = parseInt(el.style.width)||300; await saveCfg(context, cfg) } catch {} })
+    WIN().addEventListener('mouseup', async () => { if (!doing) return; doing = false; try { const cfg = await loadCfg(context); cfg.win = cfg.win || {}; cfg.win.w = parseInt(el.style.width)||MIN_WIDTH; await saveCfg(context, cfg) } catch {} })
   } catch {}
 }
 
@@ -211,8 +241,8 @@ function bindFloatDragResize(context, el){
           mayUndock = false
           try { el.classList.remove('dock-left', 'dock-right') } catch {}
           setDockPush(false)
-          const w = parseInt(el.style.width)||300
-          el.style.width = Math.max(300, w) + 'px'
+          const w = parseInt(el.style.width)||MIN_WIDTH
+          el.style.width = Math.max(MIN_WIDTH, w) + 'px'
           el.style.height = '440px'
           // 以当前位置为起点
           el.style.left = (e.clientX - 20) + 'px'
@@ -224,7 +254,7 @@ function bindFloatDragResize(context, el){
         }
       }
       if (dragging){ el.style.left = (mx + e.clientX - sx) + 'px'; el.style.top = (my + e.clientY - sy) + 'px' }
-      if (resizing){ el.style.width = Math.max(380, sw + e.clientX - sx) + 'px'; el.style.height = Math.max(300, sh + e.clientY - sy) + 'px' }
+      if (resizing){ el.style.width = Math.max(MIN_WIDTH, sw + e.clientX - sx) + 'px'; el.style.height = Math.max(300, sh + e.clientY - sy) + 'px' }
     })
     WIN().addEventListener('mouseup', async ()=>{
       if (mayUndock) { mayUndock = false; undockSide = null }
@@ -241,7 +271,7 @@ function bindFloatDragResize(context, el){
           const topH = (()=>{ try { const bar = DOC().querySelector('.menubar'); return (bar && bar.clientHeight) || 0 } catch { return 0 } })()
           el.style.top = topH + 'px'; el.style.left = '0px'; el.style.right = 'auto'; el.style.height = 'calc(100vh - ' + topH + 'px)'
           const w = parseInt(el.style.width)||300; el.style.width = w + 'px'
-          setDockPush('left')
+          setDockPush('left', w)
           try { const cfg = await loadCfg(context); cfg.dock = 'left'; cfg.win = cfg.win||{}; cfg.win.w = w; await saveCfg(context,cfg); await refreshHeader(context) } catch {}
         } else if (!el.classList.contains('dock-left') && !el.classList.contains('dock-right') && right <= 16) {
           // 右边缘吸附
@@ -249,7 +279,7 @@ function bindFloatDragResize(context, el){
           const topH = (()=>{ try { const bar = DOC().querySelector('.menubar'); return (bar && bar.clientHeight) || 0 } catch { return 0 } })()
           el.style.top = topH + 'px'; el.style.right = '0px'; el.style.left = 'auto'; el.style.height = 'calc(100vh - ' + topH + 'px)'
           const w = parseInt(el.style.width)||300; el.style.width = w + 'px'
-          setDockPush('right')
+          setDockPush('right', w)
           try { const cfg = await loadCfg(context); cfg.dock = 'right'; cfg.win = cfg.win||{}; cfg.win.w = w; await saveCfg(context,cfg); await refreshHeader(context) } catch {}
         } else {
           // 保存浮动窗口位置
@@ -475,18 +505,17 @@ async function mountWindow(context){
   ensureCss()
   const cfg = await loadCfg(context)
   const el = DOC().createElement('div'); el.id='ai-assist-win';
+  const dockWidth = Math.max(MIN_WIDTH, Number((cfg && cfg.win && cfg.win.w) || MIN_WIDTH))
   if (cfg && cfg.dock === 'left') {
     // 左侧停靠
     el.classList.add('dock-left')
     try { const bar = DOC().querySelector('.menubar'); const topH = ((bar && bar.clientHeight) || 0); el.style.top = topH + 'px'; el.style.height = 'calc(100vh - ' + topH + 'px)'; } catch { el.style.top = '0px'; el.style.height = '100vh' }
-    const sideW = Math.max(300, Number((cfg && cfg.win && cfg.win.w) || 300))
-    el.style.left = '0px'; el.style.width = sideW + 'px'
+    el.style.left = '0px'; el.style.width = dockWidth + 'px'
   } else if (cfg && cfg.dock === 'right') {
     // 右侧停靠
     el.classList.add('dock-right')
     try { const bar = DOC().querySelector('.menubar'); const topH = ((bar && bar.clientHeight) || 0); el.style.top = topH + 'px'; el.style.height = 'calc(100vh - ' + topH + 'px)'; } catch { el.style.top = '0px'; el.style.height = '100vh' }
-    const sideW = Math.max(300, Number((cfg && cfg.win && cfg.win.w) || 300))
-    el.style.right = '0px'; el.style.width = sideW + 'px'
+    el.style.right = '0px'; el.style.width = dockWidth + 'px'
   } else {
     // 浮动窗口
     el.style.top = ((cfg && cfg.win && cfg.win.y) || 60) + 'px'
@@ -509,13 +538,13 @@ async function mountWindow(context){
     '  <button class="btn" id="q-continue">续写</button><button class="btn" id="q-polish">润色</button><button class="btn" id="q-proof">纠错</button><button class="btn" id="q-outline">提纲</button><button class="btn" id="ai-clear" title="清空本篇会话">清空</button>',
     ' </div>',
     ' <div id="ai-chat"></div>',
-    ' <div id="ai-input"><textarea id="ai-text" placeholder="输入与 AI 对话…"></textarea><div style="display:flex;flex-direction:column;gap:6px">',
-    '  <button id="ai-send">发送</button><button id="ai-apply-cursor">在光标处插入</button><button id="ai-apply-repl">替换选区</button><button id="ai-copy">复制</button>',
+    ' <div id="ai-input"><textarea id="ai-text" placeholder="输入与 AI 对话…"></textarea><div class="btn-group">',
+    '  <button id="ai-send" title="发送消息">发送</button><button id="ai-apply-cursor" title="在光标处插入">光标插入</button><button id="ai-apply-repl" title="替换选中内容">替换选区</button><button id="ai-copy" title="复制AI回复">复制</button>',
     ' </div></div>',
     '</div><div id="ai-vresizer" title="拖动调整宽度"></div><div id="ai-resizer" title="拖动调整尺寸"></div>'
   ].join('')
   DOC().body.appendChild(el)
-  if (cfg && (cfg.dock === 'left' || cfg.dock === 'right')) setDockPush(cfg.dock)
+  if (cfg && (cfg.dock === 'left' || cfg.dock === 'right')) setDockPush(cfg.dock, dockWidth)
   // 绑定拖拽/调整
   try { bindDockResize(context, el) } catch {}
   try { bindFloatDragResize(context, el) } catch {}
@@ -622,16 +651,16 @@ async function toggleDockMode(context, el){
       // 左侧停靠
       el.classList.add('dock-left')
       try { const bar = DOC().querySelector('.menubar'); const topH = ((bar && bar.clientHeight) || 0); el.style.top = topH + 'px'; el.style.height = 'calc(100vh - ' + topH + 'px)'; } catch { el.style.top = '0px'; el.style.height = '100vh' }
-      const w = Math.max(300, Number((cfg && cfg.win && cfg.win.w) || 300))
+      const w = Math.max(MIN_WIDTH, Number((cfg && cfg.win && cfg.win.w) || MIN_WIDTH))
       el.style.left = '0px'; el.style.width = w + 'px'; el.style.right = 'auto'
-      setDockPush('left')
+      setDockPush('left', w)
     } else if (nextDock === 'right') {
       // 右侧停靠
       el.classList.add('dock-right')
       try { const bar = DOC().querySelector('.menubar'); const topH = ((bar && bar.clientHeight) || 0); el.style.top = topH + 'px'; el.style.height = 'calc(100vh - ' + topH + 'px)'; } catch { el.style.top = '0px'; el.style.height = '100vh' }
-      const w = Math.max(300, Number((cfg && cfg.win && cfg.win.w) || 300))
+      const w = Math.max(MIN_WIDTH, Number((cfg && cfg.win && cfg.win.w) || MIN_WIDTH))
       el.style.right = '0px'; el.style.width = w + 'px'; el.style.left = 'auto'
-      setDockPush('right')
+      setDockPush('right', w)
     } else {
       // 浮动窗口
       el.style.top = ((cfg && cfg.win && cfg.win.y) || 60) + 'px'
@@ -809,7 +838,7 @@ export async function openSettings(context){
     '  <div class="set-row"><label>Base URL</label><select id="set-base-select"><option value="https://api.openai.com/v1">OpenAI</option><option value="https://api.siliconflow.cn/v1">硅基流动</option><option value="https://apic1.ohmycdn.com/api/v1/ai/openai/cc-omg/v1">OMG资源包</option><option value="custom">自定义</option></select><input id="set-base" type="text" placeholder="https://api.openai.com/v1"/></div>',
     '  <div class="set-row"><label>API Key</label><input id="set-key" type="password" placeholder="sk-..."/></div>',
     '  <div class="set-row"><label>模型</label><input id="set-model" type="text" placeholder="gpt-4o-mini"/></div>',
-    '  <div class="set-row"><label>侧栏宽度(px)</label><input id="set-sidew" type="number" min="240" step="10" placeholder="300"/></div>',
+    '  <div class="set-row"><label>侧栏宽度(px)</label><input id="set-sidew" type="number" min="400" step="10" placeholder="400"/></div>',
     '  <div class="set-row"><label>上下文截断</label><input id="set-max" type="number" min="1000" step="500" placeholder="6000"/></div>',
     '  <div class="set-row set-link-row"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer">点此注册硅基流动得2000万免费Token</a></div>',
     '  <div class="set-row set-link-row"><a href="https://www.ohmygpt.com/i/dXCKvZ6Q" target="_blank" rel="noopener noreferrer">点此注册OMG获得20美元Claude资源包</a></div>',
@@ -834,7 +863,7 @@ export async function openSettings(context){
   elKey.value = cfg.apiKey || ''
   elModel.value = cfg.model || 'gpt-4o-mini'
   elMax.value = String((cfg.limits?.maxCtxChars) || 6000)
-  elSideW.value = String((cfg.win?.w) || 300)
+  elSideW.value = String((cfg.win?.w) || MIN_WIDTH)
   if (elBaseSel) {
     const cur = String(cfg.baseUrl || '').trim()
     if (cur === 'https://api.siliconflow.cn/v1') elBaseSel.value = 'https://api.siliconflow.cn/v1'
@@ -857,7 +886,7 @@ export async function openSettings(context){
     const apiKey = String(elKey.value || '').trim()
     const model = String(elModel.value || '').trim() || 'gpt-4o-mini'
     const n = Math.max(1000, parseInt(String(elMax.value || '6000'),10) || 6000)
-    const sidew = Math.max(240, parseInt(String(elSideW.value || '300'),10) || 300)
+    const sidew = Math.max(MIN_WIDTH, parseInt(String(elSideW.value || MIN_WIDTH),10) || MIN_WIDTH)
     const next = { ...cfg, baseUrl, apiKey, model, limits: { maxCtxChars: n }, win: { ...(cfg.win||{}), w: sidew, x: cfg.win?.x||60, y: cfg.win?.y||60, h: cfg.win?.h||440 } }
     await saveCfg(context, next)
     const m = el('ai-model'); if (m) m.value = model
@@ -868,7 +897,7 @@ export async function openSettings(context){
         const dockSide = pane.classList.contains('dock-left') ? 'left' : (pane.classList.contains('dock-right') ? 'right' : false)
         if (dockSide) {
           pane.style.width = sidew + 'px'
-          setDockPush(dockSide)
+          setDockPush(dockSide, sidew)
         }
       }
     } catch {}
@@ -879,13 +908,41 @@ export async function openSettings(context){
 // ========== 插件主入口 ==========
 export async function activate(context) {
   // 菜单：AI 助手（显示/隐藏）
-  context.addMenuItem({ label: 'AI 助手', title: '打开 AI 写作助手', onClick: async () => { await toggleWindow(context) } })
+  __AI_MENU_ITEM__ = context.addMenuItem({ label: 'AI 助手', title: '打开 AI 写作助手', onClick: async () => { await toggleWindow(context) } })
   // 预加载配置与会话
   try { const cfg = await loadCfg(context); await saveCfg(context, cfg) } catch {}
   try { __AI_SESSION__ = await loadSession(context) } catch {}
 }
 
-export function deactivate(){ /* 无状态清理需求 */ }
+export function deactivate(){
+  // 清理菜单项
+  try {
+    if (__AI_MENU_ITEM__ && typeof __AI_MENU_ITEM__.remove === 'function') {
+      __AI_MENU_ITEM__.remove()
+    }
+  } catch {}
+  // 清理窗口
+  try {
+    const win = DOC().getElementById('ai-assist-win')
+    if (win) {
+      setDockPush(false) // 恢复编辑区域
+      win.remove()
+    }
+  } catch {}
+  // 清理样式
+  try {
+    const style = DOC().getElementById('ai-assist-style')
+    if (style) style.remove()
+  } catch {}
+  // 重置全局状态
+  __AI_MENU_ITEM__ = null
+  __AI_SESSION__ = { id: '', name: '默认会话', messages: [], docHash: '', docTitle: '' }
+  __AI_DB__ = null
+  __AI_SENDING__ = false
+  __AI_LAST_REPLY__ = ''
+  __AI_TOGGLE_LOCK__ = false
+  __AI_MQ_BOUND__ = false
+}
 
 // 独立窗口入口：直接挂载 AI 浮窗
 export async function standalone(context){

@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.3.5-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.3.6-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-NonCommercial-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 ![GitHub Downloads](https://img.shields.io/github/downloads/flyhunterl/flymd/total)
@@ -42,6 +42,7 @@ A cross-platform WYSIWYG Markdown editor and PDF reader with image hosting, WebD
   - Native low-latency: Preserves `<textarea>` pipeline, IME composition-friendly, smart bracket/quote pairing without disrupting input (Edit mode)
   - Unified indent & multi-line operations: `Tab` behaves consistently in Edit/WYSIWYG modes
   - Common formatting: `Ctrl+B` bold, `Ctrl+I` italic, `Ctrl+K` insert link; precise line/column/cursor feedback
+  - Edit/reading width control: Hold `Shift` and scroll the mouse wheel to adjust edit/reading area width, making long-form reading more comfortable
   - WYSIWYG mode: Use `Ctrl+Enter` to exit code blocks
   **Edit mode uses standard syntax, double space + Enter triggers line break. Non-standard syntax will break line breaks in WYSIWYG mode. Reading mode unaffected**
   **Auto-completion only works in Edit mode**
