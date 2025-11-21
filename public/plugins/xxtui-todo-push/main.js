@@ -626,7 +626,11 @@ export function activate(context) {
                 }
             } catch {}
 
-            const condition = (ctx) => !ctx || ctx.mode === 'edit' || ctx.mode === 'wysiwyg'
+            // 在三种模式下均显示，避免阅读/所见模式出现空白占位
+            const condition = (ctx) => {
+                if (!ctx) return true
+                return ctx.mode === 'edit' || ctx.mode === 'preview' || ctx.mode === 'wysiwyg'
+            }
 
             // 一级：推送（含二级细分）
             const pushDisposer = context.addContextMenuItem({
