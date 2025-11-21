@@ -1,7 +1,7 @@
 {
   "id": "xxtui-todo-push",
   "name": "xxtui 待办推送（beta）",
-  "version": "0.1.3-beta",
+  "version": "0.1.4-beta",
   "minHostVersion": "0.3.6",
   "author": "flyMD",
   "description": "扫描当前文档中的未完成待办并推送到 xxtui（beta）",

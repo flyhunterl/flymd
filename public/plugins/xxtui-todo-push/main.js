@@ -11,14 +11,15 @@ const CFG_KEY = 'xxtui.todo.config'
 
 // 默认配置
 const DEFAULT_CFG = {
-    apiKey: '',
-    from: '飞速MarkDown',
-    channel: ''
+    apiKey: '', // 兼容旧版
+    apiKeys: [], // { key: string, note?: string, isDefault?: boolean, channel?: string }[]
+    from: '飞速MarkDown'
 }
 
 // 记录菜单解绑函数（按 plugin.md 推荐的返回值清理方式）
 const CTX_MENU_DISPOSERS = []
 let REMOVE_TOP_MENU = null
+let PLUGIN_CONTEXT = null // 保存 context 以便重新注册菜单
 
 const MENU_ACTIONS = {
     PUSH_ALL: 'push_all',
@@ -48,16 +49,27 @@ function ensureXxtuiCss() {
         css.id = 'xtui-todo-style'
         css.textContent = [
             '#xtui-set-overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;z-index:2147483600;}',
-            '#xtui-set-dialog{width:420px;max-width:92vw;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,system-ui;}',
+            '#xtui-set-dialog{width:600px;max-width:92vw;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,system-ui;}',
             '#xtui-set-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;}',
             '#xtui-set-head button{border:none;background:transparent;cursor:pointer;font-size:14px;color:#6b7280;}',
             '#xtui-set-body{padding:12px;}',
             '.xt-row{display:flex;align-items:center;gap:10px;margin:8px 0;}',
             '.xt-row label{width:110px;color:#334155;font-size:13px;}',
-            '.xt-row input,.xt-row select{flex:1;background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:8px;padding:6px 10px;font-size:13px;}',
+            '.xt-row input,.xt-row select,.xt-row textarea{flex:1;background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:8px;padding:6px 10px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,system-ui;box-sizing:border-box;}',
+            '.xt-row textarea{min-height:90px;resize:vertical;}',
+            '.xt-keys{margin-top:6px;border:1px solid #e5e7eb;border-radius:10px;padding:8px;background:#f9fafb;}',
+            '.xt-keys-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}',
+            '.xt-keys-list{display:flex;flex-direction:column;gap:8px;max-height:260px;overflow:auto;}',
+            '.xt-key-item{display:grid;grid-template-columns:1.5fr 1fr 1fr auto auto;gap:8px;align-items:center;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;}',
+            '.xt-key-item input[type="text"]{width:100%;}',
+            '.xt-key-item .xt-radio{display:flex;align-items:center;gap:6px;}',
+            '.xt-key-item button{border:1px solid #e5e7eb;border-radius:6px;background:#fff;padding:4px 8px;cursor:pointer;font-size:12px;}',
+            '.xt-small-btn{padding:4px 10px;border:1px solid #2563eb;background:#2563eb;color:#fff;border-radius:8px;font-size:12px;cursor:pointer;}',
             '.xt-help{flex-direction:column;align-items:flex-start;border-radius:8px;background:#f9fafb;border:1px solid #e5e7eb;padding:8px 10px;}',
             '.xt-help-title{font-size:13px;font-weight:600;color:#111827;margin-bottom:4px;}',
             '.xt-help-text{font-size:12px;color:#4b5563;line-height:1.5;}',
+            '.xt-help-text code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;color:#0f172a;}',
+            '.xt-help-text strong{font-weight:600;color:#0f172a;}',
             '#xtui-set-actions{display:flex;gap:10px;justify-content:flex-end;padding:10px 12px;border-top:1px solid #e5e7eb;background:#fafafa;}',
             '#xtui-set-actions button{padding:6px 12px;border-radius:8px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;font-size:13px;cursor:pointer;}',
             '#xtui-set-actions button.primary{background:#2563eb;border-color:#2563eb;color:#fff;}'
@@ -87,6 +99,203 @@ function ensureConfirmCss() {
         ].join('')
         doc.head.appendChild(css)
     } catch {}
+}
+
+// 选择 Key 弹窗样式
+function ensureKeyPickerCss() {
+    try {
+        const doc = window && window.document ? window.document : null
+        if (!doc) return
+        if (doc.getElementById('xtui-picker-style')) return
+        const css = doc.createElement('style')
+        css.id = 'xtui-picker-style'
+        css.textContent = [
+            '#xtui-picker-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:2147483601;}',
+            '#xtui-picker-dialog{width:480px;max-width:92vw;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,system-ui;}',
+            '#xtui-picker-head{padding:12px 14px;font-weight:600;color:#0f172a;border-bottom:1px solid #e5e7eb;background:#f8fafc;}',
+            '#xtui-picker-body{padding:14px;max-height:420px;overflow:auto;}',
+            '.xt-picker-section{margin-bottom:16px;}',
+            '.xt-picker-section:last-child{margin-bottom:0;}',
+            '.xt-picker-label{font-size:13px;font-weight:600;color:#111827;margin-bottom:8px;}',
+            '.xt-picker-options{display:flex;flex-direction:column;gap:6px;}',
+            '.xt-picker-option{display:flex;align-items:center;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;transition:all 0.15s;}',
+            '.xt-picker-option:hover{background:#f9fafb;border-color:#2563eb;}',
+            '.xt-picker-option.selected{background:#eff6ff;border-color:#2563eb;}',
+            '.xt-picker-option input[type="radio"]{margin-right:10px;}',
+            '.xt-picker-option-text{flex:1;}',
+            '.xt-picker-option-main{font-size:14px;color:#0f172a;font-weight:500;}',
+            '.xt-picker-option-sub{font-size:12px;color:#6b7280;margin-top:2px;}',
+            '#xtui-picker-actions{display:flex;justify-content:flex-end;gap:10px;padding:12px 14px;border-top:1px solid #e5e7eb;background:#fafafa;}',
+            '#xtui-picker-actions button{padding:6px 12px;border-radius:8px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;font-size:13px;cursor:pointer;}',
+            '#xtui-picker-actions button.primary{background:#2563eb;border-color:#2563eb;color:#fff;}',
+            '#xtui-picker-actions button:disabled{opacity:0.5;cursor:not-allowed;}'
+        ].join('')
+        doc.head.appendChild(css)
+    } catch {}
+}
+
+// 选择 Key 和推送类型弹窗，返回 Promise<{keyObj, action} | null>
+function showKeyPicker(allKeys, defaultKey) {
+    return new Promise((resolve) => {
+        try {
+            const doc = window && window.document ? window.document : null
+            if (!doc) throw new Error('NO_DOM')
+            if (!Array.isArray(allKeys) || !allKeys.length) {
+                resolve(null)
+                return
+            }
+
+            ensureKeyPickerCss()
+
+            const overlay = doc.createElement('div')
+            overlay.id = 'xtui-picker-overlay'
+
+            let selectedKey = defaultKey || allKeys[0]
+            let selectedAction = MENU_ACTIONS.PUSH_ALL
+
+            const renderDialog = () => {
+                overlay.innerHTML = [
+                    '<div id="xtui-picker-dialog">',
+                    ' <div id="xtui-picker-head">选择 Key 推送</div>',
+                    ' <div id="xtui-picker-body">',
+                    '   <div class="xt-picker-section">',
+                    '     <div class="xt-picker-label">选择 API Key</div>',
+                    '     <div class="xt-picker-options" id="xtui-picker-keys"></div>',
+                    '   </div>',
+                    '   <div class="xt-picker-section">',
+                    '     <div class="xt-picker-label">选择推送类型</div>',
+                    '     <div class="xt-picker-options" id="xtui-picker-actions"></div>',
+                    '   </div>',
+                    ' </div>',
+                    ' <div id="xtui-picker-actions">',
+                    '   <button id="xtui-picker-cancel">取消</button>',
+                    '   <button class="primary" id="xtui-picker-ok">确定推送</button>',
+                    ' </div>',
+                    '</div>'
+                ].join('')
+
+                // 渲染 Key 选项
+                const keysContainer = overlay.querySelector('#xtui-picker-keys')
+                if (keysContainer) {
+                    allKeys.forEach((keyItem, idx) => {
+                        const option = doc.createElement('div')
+                        option.className = 'xt-picker-option' + (keyItem === selectedKey ? ' selected' : '')
+
+                        const radio = doc.createElement('input')
+                        radio.type = 'radio'
+                        radio.name = 'xtui-key'
+                        radio.checked = keyItem === selectedKey
+
+                        const textDiv = doc.createElement('div')
+                        textDiv.className = 'xt-picker-option-text'
+
+                        const mainText = doc.createElement('div')
+                        mainText.className = 'xt-picker-option-main'
+                        const isDefault = defaultKey && keyItem === defaultKey
+                        mainText.textContent = describeKey(keyItem) + (isDefault ? ' （默认）' : '')
+
+                        const subText = doc.createElement('div')
+                        subText.className = 'xt-picker-option-sub'
+                        const channelText = keyItem.channel ? '渠道: ' + keyItem.channel : '默认渠道'
+                        subText.textContent = 'Key: ' + keyItem.key + ' | ' + channelText
+
+                        textDiv.appendChild(mainText)
+                        textDiv.appendChild(subText)
+
+                        option.appendChild(radio)
+                        option.appendChild(textDiv)
+
+                        option.addEventListener('click', () => {
+                            selectedKey = keyItem
+                            renderDialog()
+                        })
+
+                        keysContainer.appendChild(option)
+                    })
+                }
+
+                // 渲染推送类型选项
+                const actionsContainer = overlay.querySelector('#xtui-picker-actions')
+                if (actionsContainer) {
+                    const actionOptions = [
+                        { action: MENU_ACTIONS.PUSH_ALL, label: '推送全部', desc: '推送所有待办（已完成+未完成）' },
+                        { action: MENU_ACTIONS.PUSH_DONE, label: '推送已完成', desc: '仅推送已完成的待办' },
+                        { action: MENU_ACTIONS.PUSH_TODO, label: '推送未完成', desc: '仅推送未完成的待办' }
+                    ]
+
+                    actionOptions.forEach((item) => {
+                        const option = doc.createElement('div')
+                        option.className = 'xt-picker-option' + (item.action === selectedAction ? ' selected' : '')
+
+                        const radio = doc.createElement('input')
+                        radio.type = 'radio'
+                        radio.name = 'xtui-action'
+                        radio.checked = item.action === selectedAction
+
+                        const textDiv = doc.createElement('div')
+                        textDiv.className = 'xt-picker-option-text'
+
+                        const mainText = doc.createElement('div')
+                        mainText.className = 'xt-picker-option-main'
+                        mainText.textContent = item.label
+
+                        const subText = doc.createElement('div')
+                        subText.className = 'xt-picker-option-sub'
+                        subText.textContent = item.desc
+
+                        textDiv.appendChild(mainText)
+                        textDiv.appendChild(subText)
+
+                        option.appendChild(radio)
+                        option.appendChild(textDiv)
+
+                        option.addEventListener('click', () => {
+                            selectedAction = item.action
+                            renderDialog()
+                        })
+
+                        actionsContainer.appendChild(option)
+                    })
+                }
+
+                // 绑定按钮事件
+                const btnOk = overlay.querySelector('#xtui-picker-ok')
+                const btnCancel = overlay.querySelector('#xtui-picker-cancel')
+
+                if (btnOk) {
+                    btnOk.addEventListener('click', () => {
+                        cleanup({ keyObj: selectedKey, action: selectedAction })
+                    })
+                }
+
+                if (btnCancel) {
+                    btnCancel.addEventListener('click', () => {
+                        cleanup(null)
+                    })
+                }
+            }
+
+            const host = doc.body || doc.documentElement
+            host.appendChild(overlay)
+            renderDialog()
+
+            const cleanup = (result) => {
+                try { overlay.remove() } catch {}
+                resolve(result)
+            }
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) cleanup(null)
+            })
+
+            const onKey = (e) => {
+                if (e.key === 'Escape') cleanup(null)
+            }
+            try { doc.addEventListener('keydown', onKey, { once: true }) } catch {}
+        } catch {
+            resolve(null)
+        }
+    })
 }
 
 // 自定义确认弹窗，返回 Promise<boolean>
@@ -144,7 +353,30 @@ async function loadCfg(context) {
         const raw = await context.storage.get(CFG_KEY)
         if (!raw || typeof raw !== 'object') return { ...DEFAULT_CFG }
         const merged = { ...DEFAULT_CFG, ...raw }
-        log('配置已加载', { hasKey: !!merged.apiKey, from: merged.from, channel: !!merged.channel })
+
+        // 兼容旧版单 key：如果 apiKeys 为空而 apiKey 存在，则迁移
+        if ((!Array.isArray(merged.apiKeys) || !merged.apiKeys.length) && merged.apiKey) {
+            merged.apiKeys = [{ key: merged.apiKey, note: '默认', isDefault: true, channel: merged.channel || '' }]
+        }
+
+        // 兼容旧版全局 channel：如果存在全局 channel 但默认 Key 没有 channel，则迁移
+        if (merged.channel && Array.isArray(merged.apiKeys) && merged.apiKeys.length) {
+            const defaultKey = merged.apiKeys.find((k) => k && k.isDefault)
+            if (defaultKey && !defaultKey.channel) {
+                defaultKey.channel = merged.channel
+            }
+        }
+
+        // 规整 key 列表并保证唯一默认
+        merged.apiKeys = normalizeApiKeys(merged.apiKeys)
+        merged.apiKey = merged.apiKeys.length ? merged.apiKeys.find((k) => k.isDefault)?.key || merged.apiKeys[0].key : ''
+
+        log('配置已加载', {
+            hasKey: !!merged.apiKey,
+            keyCount: merged.apiKeys.length,
+            from: merged.from,
+            channel: !!merged.channel
+        })
         return merged
     } catch {
         return { ...DEFAULT_CFG }
@@ -155,10 +387,69 @@ async function loadCfg(context) {
 async function saveCfg(context, cfg) {
     try {
         if (!context || !context.storage || !context.storage.set) return
-        await context.storage.set(CFG_KEY, cfg || { ...DEFAULT_CFG })
+        const normalized = { ...DEFAULT_CFG, ...cfg }
+        normalized.apiKeys = normalizeApiKeys(normalized.apiKeys)
+        normalized.apiKey = normalized.apiKeys.length
+            ? normalized.apiKeys.find((k) => k.isDefault)?.key || normalized.apiKeys[0].key
+            : ''
+        await context.storage.set(CFG_KEY, normalized)
     } catch {
         // 忽略存储错误
     }
+}
+
+// 规范化多密钥，确保最多一个默认，缺省时让第一条为默认
+function normalizeApiKeys(list) {
+    const arr = Array.isArray(list) ? list : []
+    const cleaned = []
+    for (const item of arr) {
+        if (!item || !item.key) continue
+        cleaned.push({
+            key: String(item.key).trim(),
+            note: item.note ? String(item.note).trim() : '',
+            isDefault: !!item.isDefault,
+            channel: item.channel ? String(item.channel).trim() : ''
+        })
+    }
+    if (!cleaned.length) return []
+    // 确保只有一个默认
+    let defaultFound = false
+    cleaned.forEach((item) => {
+        if (item.isDefault && !defaultFound) {
+            defaultFound = true
+            item.isDefault = true
+        } else {
+            item.isDefault = false
+        }
+    })
+    if (!defaultFound) cleaned[0].isDefault = true
+    return cleaned
+}
+
+// 确保列表中有且仅有一个默认，若空则补空行并设默认
+function ensureDefaultKey(list) {
+    const arr = Array.isArray(list) ? list.slice() : []
+    if (!arr.length) {
+        arr.push({ key: '', note: '', isDefault: true, channel: '' })
+        return arr
+    }
+    const hasDefault = arr.some((k) => k && k.isDefault)
+    if (!hasDefault) arr[0].isDefault = true
+    return arr
+}
+
+function pickDefaultKey(cfg) {
+    if (!cfg || !Array.isArray(cfg.apiKeys)) return null
+    const def = cfg.apiKeys.find((k) => k && k.isDefault)
+    if (def) return def
+    return cfg.apiKeys[0] || null
+}
+
+function describeKey(item) {
+    if (!item) return ''
+    const key = String(item.key || '')
+    const tail = key.length > 8 ? key.slice(-4) : key
+    return item.note ? item.note + ' (' + tail + ')' : 'Key ' + tail
 }
 
 // 从文档内容中提取所有待办（识别「- [ ] 文本」/「- [x] 文本」以及 * 列表）
@@ -318,8 +609,8 @@ function parseTodoTime(title, nowSec) {
 }
 
 // 立即推送单条待办到 xxtui
-async function pushInstantBatch(context, cfg, todos, filterLabel) {
-    const key = String(cfg && cfg.apiKey || '').trim()
+async function pushInstantBatch(context, cfg, todos, filterLabel, keyObj) {
+    const key = keyObj && keyObj.key ? String(keyObj.key).trim() : ''
     if (!key) throw new Error('NO_API_KEY')
     const list = Array.isArray(todos) ? todos.filter(Boolean) : []
     if (!list.length) throw new Error('NO_TODO')
@@ -342,7 +633,7 @@ async function pushInstantBatch(context, cfg, todos, filterLabel) {
         from: (cfg && cfg.from) || '飞速MarkDown',
         title: '[TODO] ' + label + ' · ' + list.length + ' 条',
         content: lines.join('\n'),
-        channel: cfg && cfg.channel ? String(cfg.channel) : ''
+        channel: keyObj && keyObj.channel ? String(keyObj.channel) : ''
     }
 
     if (!payload.channel) {
@@ -365,8 +656,8 @@ async function pushInstantBatch(context, cfg, todos, filterLabel) {
 }
 
 // 创建定时提醒
-async function pushScheduledTodo(context, cfg, todo) {
-    const key = String(cfg && cfg.apiKey || '').trim()
+async function pushScheduledTodo(context, cfg, todo, keyObj) {
+    const key = keyObj && keyObj.key ? String(keyObj.key).trim() : ''
     if (!key) throw new Error('NO_API_KEY')
     const ts = todo && todo.reminderTime ? Number(todo.reminderTime) : 0
     if (!ts || !Number.isFinite(ts)) throw new Error('BAD_TIME')
@@ -414,8 +705,8 @@ async function pushScheduledTodo(context, cfg, todo) {
     }
 }
 
-async function runPushFlow(context, cfg, type) {
-    log('开始推送流程', { type })
+async function runPushFlow(context, cfg, type, keyObj) {
+    log('开始推送流程', { type, keyObj: keyObj ? 'custom' : 'default' })
 
     if (!context || !context.getEditorValue) {
         if (context && context.ui && context.ui.notice) {
@@ -448,7 +739,7 @@ async function runPushFlow(context, cfg, type) {
     if (!okConfirm) return
 
     try {
-        await pushInstantBatch(context, cfg, filtered, label)
+        await pushInstantBatch(context, cfg, filtered, label, keyObj)
         if (context && context.ui && context.ui.notice) {
             context.ui.notice('xxtui 推送完成：已发送 ' + filtered.length + ' 条（beta）', 'ok', 3600)
         }
@@ -460,8 +751,8 @@ async function runPushFlow(context, cfg, type) {
     }
 }
 
-async function runReminderFlow(context, cfg) {
-    log('开始提醒流程')
+async function runReminderFlow(context, cfg, keyObj) {
+    log('开始提醒流程', { keyObj: keyObj ? 'custom' : 'default' })
 
     if (!context || !context.getEditorValue) {
         if (context && context.ui && context.ui.notice) {
@@ -517,7 +808,7 @@ async function runReminderFlow(context, cfg) {
     let failCount = 0
     for (const todo of scheduled) {
         try {
-            await pushScheduledTodo(context, cfg, todo)
+            await pushScheduledTodo(context, cfg, todo, keyObj)
             okCount++
         } catch {
             failCount++
@@ -532,7 +823,154 @@ async function runReminderFlow(context, cfg) {
     }
 }
 
-async function handleMenuAction(context, action) {
+// ========== 插件通信 API（供其他插件调用）==========
+
+/**
+ * 推送消息到 xxtui（使用默认 Key）
+ * @param {string} title - 标题
+ * @param {string} content - 内容
+ * @returns {Promise<boolean>} 是否成功
+ */
+async function pushToXxtui(title, content) {
+    try {
+        if (!PLUGIN_CONTEXT) throw new Error('Plugin not initialized')
+
+        const cfg = await loadCfg(PLUGIN_CONTEXT)
+        const defaultKey = pickDefaultKey(cfg)
+
+        if (!defaultKey || !defaultKey.key) {
+            throw new Error('NO_DEFAULT_KEY')
+        }
+
+        const url = 'https://www.xxtui.com/xxtui/' + encodeURIComponent(defaultKey.key)
+        const payload = {
+            from: (cfg && cfg.from) || '飞速MarkDown',
+            title: String(title || ''),
+            content: String(content || ''),
+            channel: defaultKey.channel ? String(defaultKey.channel) : ''
+        }
+
+        if (!payload.channel) {
+            delete payload.channel
+        }
+
+        await PLUGIN_CONTEXT.http.fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+
+        log('API推送成功', { title })
+        return true
+    } catch (err) {
+        log('API推送失败', err)
+        return false
+    }
+}
+
+/**
+ * 创建定时提醒（使用默认 Key）
+ * @param {string} title - 标题
+ * @param {string} content - 内容
+ * @param {number} reminderTime - 提醒时间（秒级时间戳）
+ * @returns {Promise<boolean>} 是否成功
+ */
+async function createReminder(title, content, reminderTime) {
+    try {
+        if (!PLUGIN_CONTEXT) throw new Error('Plugin not initialized')
+
+        const cfg = await loadCfg(PLUGIN_CONTEXT)
+        const defaultKey = pickDefaultKey(cfg)
+
+        if (!defaultKey || !defaultKey.key) {
+            throw new Error('NO_DEFAULT_KEY')
+        }
+
+        const ts = Number(reminderTime)
+        if (!ts || !Number.isFinite(ts)) {
+            throw new Error('Invalid reminderTime')
+        }
+
+        const url = 'https://www.xxtui.com/scheduled/reminder/' + encodeURIComponent(defaultKey.key)
+        const payload = {
+            title: String(title || ''),
+            content: String(content || ''),
+            reminderTime: ts
+        }
+
+        await PLUGIN_CONTEXT.http.fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+
+        log('API提醒创建成功', { title, ts })
+        return true
+    } catch (err) {
+        log('API提醒创建失败', err)
+        return false
+    }
+}
+
+/**
+ * 解析内容中的待办并批量创建提醒（使用默认 Key）
+ * @param {string} content - Markdown 内容
+ * @returns {Promise<{success: number, failed: number}>} 成功和失败的数量
+ */
+async function parseAndCreateReminders(content) {
+    try {
+        if (!PLUGIN_CONTEXT) throw new Error('Plugin not initialized')
+
+        const allTodos = extractTodos(content)
+        const pending = allTodos.filter((item) => item && !item.done)
+
+        if (!pending.length) {
+            log('API解析提醒：无未完成待办')
+            return { success: 0, failed: 0 }
+        }
+
+        const nowSec = Math.floor(Date.now() / 1000)
+        const scheduled = []
+
+        for (const todo of pending) {
+            const parsed = parseTodoTime(todo.title, nowSec)
+            if (!parsed) continue
+            scheduled.push({
+                title: parsed.title,
+                content: todo.content,
+                reminderTime: parsed.reminderTime
+            })
+        }
+
+        log('API解析到提醒待办', scheduled.length)
+
+        if (!scheduled.length) {
+            return { success: 0, failed: 0 }
+        }
+
+        let success = 0
+        let failed = 0
+
+        for (const item of scheduled) {
+            const ok = await createReminder(item.title, item.content, item.reminderTime)
+            if (ok) {
+                success++
+            } else {
+                failed++
+            }
+        }
+
+        log('API批量提醒完成', { success, failed })
+        return { success, failed }
+    } catch (err) {
+        log('API解析提醒失败', err)
+        return { success: 0, failed: 0 }
+    }
+}
+
+// ========== 菜单处理函数 ==========
+
+async function handleMenuAction(context, action, keyObj) {
     try {
         log('处理菜单动作', action)
 
@@ -544,8 +982,18 @@ async function handleMenuAction(context, action) {
         }
 
         const cfg = await loadCfg(context)
-        const key = String(cfg.apiKey || '').trim()
-        if (!key) {
+
+        // 兼容传入字符串 key 的情况，从配置中查找对应的 keyObj
+        let actualKeyObj = keyObj
+        if (typeof keyObj === 'string') {
+            actualKeyObj = cfg.apiKeys.find((k) => k && k.key === keyObj)
+        }
+        // 如果没有传入 keyObj，使用默认 Key
+        if (!actualKeyObj) {
+            actualKeyObj = pickDefaultKey(cfg)
+        }
+
+        if (!actualKeyObj || !actualKeyObj.key) {
             if (context && context.ui && context.ui.notice) {
                 context.ui.notice('请先在插件设置中配置 xxtui API Key（beta）', 'err', 3200)
             }
@@ -553,7 +1001,7 @@ async function handleMenuAction(context, action) {
         }
 
         if (action === MENU_ACTIONS.CREATE_REMINDER) {
-            await runReminderFlow(context, cfg)
+            await runReminderFlow(context, cfg, actualKeyObj)
             return
         }
 
@@ -562,7 +1010,7 @@ async function handleMenuAction(context, action) {
             action === MENU_ACTIONS.PUSH_DONE ||
             action === MENU_ACTIONS.PUSH_TODO
         ) {
-            await runPushFlow(context, cfg, action)
+            await runPushFlow(context, cfg, action, actualKeyObj)
             return
         }
     } catch (e) {
@@ -574,6 +1022,74 @@ async function handleMenuAction(context, action) {
     }
 }
 
+// 处理"选择 Key"弹窗选择
+async function handlePushWithKeyPicker(context) {
+    try {
+        const cfg = await loadCfg(context)
+        const allKeys = cfg.apiKeys || []
+
+        if (!allKeys.length || !allKeys.some(k => k && k.key)) {
+            if (context && context.ui && context.ui.notice) {
+                context.ui.notice('暂无 API Key，请在设置中添加', 'err', 2600)
+            }
+            return
+        }
+
+        const defaultKey = pickDefaultKey(cfg)
+        const result = await showKeyPicker(allKeys, defaultKey)
+        if (!result || !result.keyObj || !result.action) return
+
+        await handleMenuAction(context, result.action, result.keyObj)
+    } catch (e) {
+        log('选择Key推送失败', e)
+    }
+}
+
+// 注册右键菜单（支持重新注册以刷新多 Key 列表）
+async function registerContextMenus(context) {
+    if (!context || !context.addContextMenuItem) return
+
+    // 清理旧的右键菜单
+    try {
+        while (CTX_MENU_DISPOSERS.length) {
+            const d = CTX_MENU_DISPOSERS.pop()
+            try { typeof d === 'function' && d() } catch {}
+        }
+    } catch {}
+
+    // 在三种模式下均显示
+    const condition = (ctx) => {
+        if (!ctx) return true
+        return ctx.mode === 'edit' || ctx.mode === 'preview' || ctx.mode === 'wysiwyg'
+    }
+
+    // 加载配置
+    const cfg = await loadCfg(context)
+    const defaultKey = pickDefaultKey(cfg)
+
+    // 一级：推送到 xxtui（点击直接弹窗选择 Key）
+    const pushDisposer = context.addContextMenuItem({
+        label: '推送到 xxtui',
+        icon: '📤',
+        condition,
+        onClick: () => handlePushWithKeyPicker(context)
+    })
+
+    // 一级：创建提醒（使用默认 Key）
+    const reminderDisposer = context.addContextMenuItem({
+            label: '创建提醒 (@时间)',
+            icon: '⏰',
+            condition,
+            onClick: () => handleMenuAction(context, MENU_ACTIONS.CREATE_REMINDER, defaultKey)
+        })
+
+    ;[pushDisposer, reminderDisposer].forEach((d) => {
+        if (typeof d === 'function') CTX_MENU_DISPOSERS.push(d)
+    })
+
+    log('右键菜单已注册（简化版）')
+}
+
 export function activate(context) {
     // 检查必要能力是否存在
     if (!context || !context.getEditorValue || !context.http || !context.http.fetch) {
@@ -582,6 +1098,9 @@ export function activate(context) {
         }
         return
     }
+
+    // 保存 context 以便后续重新注册菜单
+    PLUGIN_CONTEXT = context
 
     // 顶部菜单
     try { if (REMOVE_TOP_MENU) { REMOVE_TOP_MENU(); REMOVE_TOP_MENU = null } } catch {}
@@ -615,62 +1134,37 @@ export function activate(context) {
         })
     } catch {}
 
-    // 右键菜单入口：同样提供推送/提醒的快捷操作
-    try {
-        if (context.addContextMenuItem) {
-            // 防止重复注册：先清理旧的
-            try {
-                while (CTX_MENU_DISPOSERS.length) {
-                    const d = CTX_MENU_DISPOSERS.pop()
-                    try { typeof d === 'function' && d() } catch {}
-                }
-            } catch {}
+    // 右键菜单入口：支持多 Key 动态更新
+    registerContextMenus(context).catch((err) => log('右键菜单注册失败', err))
 
-            // 在三种模式下均显示，避免阅读/所见模式出现空白占位
-            const condition = (ctx) => {
-                if (!ctx) return true
-                return ctx.mode === 'edit' || ctx.mode === 'preview' || ctx.mode === 'wysiwyg'
-            }
+    // 注册插件通信 API，供其他插件调用
+    context.registerAPI('xxtui-todo-push', {
+        /**
+         * 推送消息到 xxtui（使用默认 Key）
+         * @param {string} title - 标题
+         * @param {string} content - 内容
+         * @returns {Promise<boolean>} 是否成功
+         */
+        pushToXxtui,
 
-            // 一级：推送（含二级细分）
-            const pushDisposer = context.addContextMenuItem({
-                label: '推送待办',
-                icon: '📤',
-                condition,
-                children: [
-                    {
-                        label: '推送全部',
-                        icon: '📝',
-                        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_ALL)
-                    },
-                    {
-                        label: '推送已完成',
-                        icon: '✅',
-                        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_DONE)
-                    },
-                    {
-                        label: '推送未完成',
-                        icon: '⭕',
-                        onClick: () => handleMenuAction(context, MENU_ACTIONS.PUSH_TODO)
-                    }
-                ]
-            })
+        /**
+         * 创建定时提醒（使用默认 Key）
+         * @param {string} title - 标题
+         * @param {string} content - 内容
+         * @param {number} reminderTime - 提醒时间（秒级时间戳）
+         * @returns {Promise<boolean>} 是否成功
+         */
+        createReminder,
 
-            // 一级：创建提醒（单项）
-            const reminderDisposer = context.addContextMenuItem({
-                    label: '创建提醒 (@时间)',
-                    icon: '⏰',
-                    condition,
-                    onClick: () => handleMenuAction(context, MENU_ACTIONS.CREATE_REMINDER)
-                })
+        /**
+         * 解析内容中的待办并批量创建提醒（使用默认 Key）
+         * @param {string} content - Markdown 内容
+         * @returns {Promise<{success: number, failed: number}>} 成功和失败的数量
+         */
+        parseAndCreateReminders
+    })
 
-            ;[pushDisposer, reminderDisposer].forEach((d) => {
-                if (typeof d === 'function') CTX_MENU_DISPOSERS.push(d)
-            })
-        }
-    } catch (e) {
-        log('右键菜单注册失败', e && e.message ? e.message : e)
-    }
+    log('插件 API 已注册')
 }
 
 export async function openSettings(context) {
@@ -712,8 +1206,30 @@ export async function openSettings(context) {
             '      <div style="margin-top:4px;"><a href="https://www.xxtui.com/" target="_blank" rel="noopener noreferrer">打开 xxtui 官网</a></div>',
             '    </div>',
             '  </div>',
-            '  <div class="xt-row"><label>API Key</label><input id="xtui-set-key" type="text" placeholder="在 xxtui 渠道管理中查看 apikey"/></div>',
-            '  <div class="xt-row"><label>渠道 channel</label><input id="xtui-set-channel" type="text" placeholder="可留空，使用 xxtui 默认渠道"/></div>',
+            '  <div class="xt-row xt-help">',
+            '    <div class="xt-help-title">插件 API（供其他插件调用）</div>',
+            '    <div class="xt-help-text" style="font-size:12px;line-height:1.6;">',
+            '      <div style="margin-bottom:6px;font-weight:600;color:#111827;">其他插件可通过以下方式获取并调用本插件 API：</div>',
+            '      <code style="display:block;background:#f1f5f9;padding:8px;border-radius:4px;margin-bottom:8px;overflow-x:auto;white-space:pre;">const api = context.getPluginAPI(\'xxtui-todo-push\')</code>',
+            '      <div style="margin-top:8px;font-weight:600;color:#111827;">提供的 3 个 API：</div>',
+            '      <div style="margin-top:4px;"><strong>1. pushToXxtui(title, content)</strong> - 推送消息</div>',
+            '      <div style="margin-left:12px;color:#64748b;">推送到默认 Key，from 取自设置项（默认：飞速MarkDown）</div>',
+            '      <div style="margin-top:4px;"><strong>2. createReminder(title, content, reminderTime)</strong> - 创建提醒</div>',
+            '      <div style="margin-left:12px;color:#64748b;">reminderTime 为秒级时间戳，使用默认 Key</div>',
+            '      <div style="margin-top:4px;"><strong>3. parseAndCreateReminders(content)</strong> - 解析并创建提醒</div>',
+            '      <div style="margin-left:12px;color:#64748b;">自动解析 Markdown 内容中的待办（- [ ] 任务 @时间），批量创建提醒</div>',
+            '      <div style="margin-left:12px;color:#64748b;">返回：{success: number, failed: number}</div>',
+            '    </div>',
+            '  </div>',
+            '  <div class="xt-row" style="flex-direction:column;align-items:stretch;">',
+            '    <div class="xt-keys">',
+            '      <div class="xt-keys-head">',
+            '        <div style="font-weight:600;color:#111827;">API Keys</div>',
+            '        <button class="xt-small-btn" id="xtui-add-key">新增 Key</button>',
+            '      </div>',
+            '      <div class="xt-keys-list" id="xtui-keys-list"></div>',
+            '    </div>',
+            '  </div>',
             '  <div class="xt-row"><label>来源 from</label><input id="xtui-set-from" type="text" placeholder="飞速MarkDown"/></div>',
             ' </div>',
             ' <div id="xtui-set-actions"><button id="xtui-set-cancel">取消</button><button class="primary" id="xtui-set-ok">保存</button></div>',
@@ -723,12 +1239,88 @@ export async function openSettings(context) {
         const host = doc.body || doc.documentElement
         host.appendChild(overlay)
 
-        const elKey = overlay.querySelector('#xtui-set-key')
-        const elChannel = overlay.querySelector('#xtui-set-channel')
+        const elKeysList = overlay.querySelector('#xtui-keys-list')
+        const elAddKey = overlay.querySelector('#xtui-add-key')
         const elFrom = overlay.querySelector('#xtui-set-from')
 
-        if (elKey) elKey.value = cfg.apiKey || ''
-        if (elChannel) elChannel.value = cfg.channel || ''
+        let keyList = ensureDefaultKey(cfg.apiKeys)
+
+        const renderKeys = () => {
+            if (!elKeysList) return
+            elKeysList.innerHTML = ''
+            if (!keyList.length) keyList = ensureDefaultKey([])
+
+            keyList.forEach((item, idx) => {
+                const wrap = doc.createElement('div')
+                wrap.className = 'xt-key-item'
+
+                const inputKey = doc.createElement('input')
+                inputKey.type = 'text'
+                inputKey.placeholder = 'API Key'
+                inputKey.value = item.key || ''
+                inputKey.addEventListener('input', (e) => {
+                    keyList[idx].key = e.target.value
+                })
+
+                const inputNote = doc.createElement('input')
+                inputNote.type = 'text'
+                inputNote.placeholder = 'Note (Required)'
+                inputNote.value = item.note || ''
+                inputNote.addEventListener('input', (e) => {
+                    keyList[idx].note = e.target.value
+                })
+
+                const inputChannel = doc.createElement('input')
+                inputChannel.type = 'text'
+                inputChannel.placeholder = 'Channel'
+                inputChannel.value = item.channel || ''
+                inputChannel.addEventListener('input', (e) => {
+                    keyList[idx].channel = e.target.value
+                })
+
+                const radioWrap = doc.createElement('div')
+                radioWrap.className = 'xt-radio'
+                const radio = doc.createElement('input')
+                radio.type = 'radio'
+                radio.name = 'xtui-key-default'
+                radio.checked = !!item.isDefault
+                radio.addEventListener('change', () => {
+                    keyList = keyList.map((k, i) => ({ ...k, isDefault: i === idx }))
+                    renderKeys()
+                })
+                const rLabel = doc.createElement('span')
+                rLabel.textContent = '默认'
+                radioWrap.appendChild(radio)
+                radioWrap.appendChild(rLabel)
+
+                const btnDel = doc.createElement('button')
+                btnDel.textContent = '删除'
+                btnDel.addEventListener('click', () => {
+                    keyList.splice(idx, 1)
+                    keyList = ensureDefaultKey(keyList)
+                    renderKeys()
+                })
+
+                wrap.appendChild(inputKey)
+                wrap.appendChild(inputNote)
+                wrap.appendChild(inputChannel)
+                wrap.appendChild(radioWrap)
+                wrap.appendChild(btnDel)
+                elKeysList.appendChild(wrap)
+            })
+        }
+
+        if (elAddKey) {
+            elAddKey.addEventListener('click', () => {
+                const needDefault = !keyList.some((k) => k.isDefault)
+                keyList.push({ key: '', note: '', channel: '', isDefault: needDefault })
+                keyList = ensureDefaultKey(keyList)
+                renderKeys()
+            })
+        }
+
+        renderKeys()
+
         if (elFrom) elFrom.value = cfg.from || '飞速MarkDown'
 
         const close = () => {
@@ -756,17 +1348,35 @@ export async function openSettings(context) {
         const btnOk = overlay.querySelector('#xtui-set-ok')
         if (btnOk) {
             btnOk.addEventListener('click', async () => {
-                const apiKey = elKey ? String(elKey.value || '').trim() : ''
-                const channel = elChannel ? String(elChannel.value || '').trim() : ''
+                // 验证：每个有效的 Key 必须有备注
+                const hasInvalidKey = keyList.some((item) => {
+                    const key = item && item.key ? String(item.key).trim() : ''
+                    const note = item && item.note ? String(item.note).trim() : ''
+                    return key && !note // 有 Key 但没有备注
+                })
+
+                if (hasInvalidKey) {
+                    if (context.ui && context.ui.notice) {
+                        context.ui.notice('请为每个 API Key 填写备注（必填）', 'err', 3000)
+                    }
+                    return
+                }
+
+                const apiKeys = normalizeApiKeys(keyList)
                 const from = elFrom ? String(elFrom.value || '').trim() || '飞速MarkDown' : '飞速MarkDown'
 
                 const nextCfg = {
-                    apiKey,
-                    channel,
+                    apiKeys,
                     from
                 }
 
                 await saveCfg(context, nextCfg)
+
+                // 重新注册右键菜单以刷新多 Key 列表
+                if (PLUGIN_CONTEXT) {
+                    registerContextMenus(PLUGIN_CONTEXT).catch((err) => log('重新注册菜单失败', err))
+                }
+
                 if (context.ui && context.ui.notice) {
                     context.ui.notice('xxtui 配置已保存（beta）', 'ok', 2000)
                 }
@@ -809,6 +1419,8 @@ export function deactivate() {
     // 清理样式和残留浮层
     removeElById('xtui-todo-style')
     removeElById('xtui-confirm-style')
+    removeElById('xtui-picker-style')
     removeElById('xtui-set-overlay')
     removeElById('xtui-confirm-overlay')
+    removeElById('xtui-picker-overlay')
 }
