@@ -49,17 +49,17 @@ function ensureXxtuiCss() {
         css.id = 'xtui-todo-style'
         css.textContent = [
             '#xtui-set-overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;z-index:2147483600;}',
-            '#xtui-set-dialog{width:600px;max-width:92vw;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,system-ui;}',
+            '#xtui-set-dialog{width:600px;max-width:92vw;max-height:90vh;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,system-ui;display:flex;flex-direction:column;}',
             '#xtui-set-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;}',
             '#xtui-set-head button{border:none;background:transparent;cursor:pointer;font-size:14px;color:#6b7280;}',
-            '#xtui-set-body{padding:12px;}',
+            '#xtui-set-body{padding:12px;overflow-y:auto;flex:1;}',
             '.xt-row{display:flex;align-items:center;gap:10px;margin:8px 0;}',
             '.xt-row label{width:110px;color:#334155;font-size:13px;}',
             '.xt-row input,.xt-row select,.xt-row textarea{flex:1;background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:8px;padding:6px 10px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,system-ui;box-sizing:border-box;}',
             '.xt-row textarea{min-height:90px;resize:vertical;}',
             '.xt-keys{margin-top:6px;border:1px solid #e5e7eb;border-radius:10px;padding:8px;background:#f9fafb;}',
             '.xt-keys-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}',
-            '.xt-keys-list{display:flex;flex-direction:column;gap:8px;max-height:260px;overflow:auto;}',
+            '.xt-keys-list{display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto;}',
             '.xt-key-item{display:grid;grid-template-columns:1.5fr 1fr 1fr auto auto;gap:8px;align-items:center;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;}',
             '.xt-key-item input[type="text"]{width:100%;}',
             '.xt-key-item .xt-radio{display:flex;align-items:center;gap:6px;}',
@@ -338,6 +338,66 @@ function showConfirm(message) {
             const onKey = (e) => {
                 if (e.key === 'Escape') cleanup(false)
                 if (e.key === 'Enter') cleanup(true)
+            }
+            try { doc.addEventListener('keydown', onKey, { once: true }) } catch {}
+        } catch {
+            resolve(false)
+        }
+    })
+}
+
+// 自定义API Key缺失提示弹窗，提供打开设置窗口选项
+async function showApiKeyMissingDialog(context) {
+    return new Promise((resolve) => {
+        try {
+            const doc = window && window.document ? window.document : null
+            if (!doc) throw new Error('NO_DOM')
+            ensureConfirmCss()
+
+            const overlay = doc.createElement('div')
+            overlay.id = 'xtui-confirm-overlay'
+            overlay.innerHTML = [
+                '<div id="xtui-confirm-dialog">',
+                ' <div id="xtui-confirm-head">提示</div>',
+                ' <div id="xtui-confirm-body">您还没有配置API Key，请先配置。</div>',
+                ' <div id="xtui-confirm-actions">',
+                '   <button id="xtui-confirm-cancel">取消</button>',
+                '   <button class="primary" id="xtui-confirm-ok">去配置</button>',
+                ' </div>',
+                '</div>'
+            ].join('')
+
+            const host = doc.body || doc.documentElement
+            host.appendChild(overlay)
+
+            const cleanup = (ret) => {
+                try { overlay.remove() } catch {}
+                resolve(!!ret)
+            }
+
+            const btnOk = overlay.querySelector('#xtui-confirm-ok')
+            const btnCancel = overlay.querySelector('#xtui-confirm-cancel')
+
+            if (btnOk) {
+                btnOk.addEventListener('click', async () => {
+                    cleanup(true)
+                    // 用户点击"去配置"后打开设置窗口
+                    if (typeof context.openSettings === 'function') {
+                        await context.openSettings()
+                    } else if (typeof openSettings === 'function') {
+                        await openSettings(context)
+                    }
+                })
+            }
+
+            if (btnCancel) {
+                btnCancel.addEventListener('click', () => cleanup(false))
+            }
+
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false) })
+
+            const onKey = (e) => {
+                if (e.key === 'Escape') cleanup(false)
             }
             try { doc.addEventListener('keydown', onKey, { once: true }) } catch {}
         } catch {
@@ -839,7 +899,11 @@ async function pushToXxtui(title, content) {
         const defaultKey = pickDefaultKey(cfg)
 
         if (!defaultKey || !defaultKey.key) {
-            throw new Error('NO_DEFAULT_KEY')
+            // 统一处理没有API Key的情况，使用自定义弹窗
+            if (PLUGIN_CONTEXT) {
+                await showApiKeyMissingDialog(PLUGIN_CONTEXT)
+            }
+            return false
         }
 
         const url = 'https://www.xxtui.com/xxtui/' + encodeURIComponent(defaultKey.key)
@@ -883,7 +947,11 @@ async function createReminder(title, content, reminderTime) {
         const defaultKey = pickDefaultKey(cfg)
 
         if (!defaultKey || !defaultKey.key) {
-            throw new Error('NO_DEFAULT_KEY')
+            // 统一处理没有API Key的情况，使用自定义弹窗
+            if (PLUGIN_CONTEXT) {
+                await showApiKeyMissingDialog(PLUGIN_CONTEXT)
+            }
+            return false
         }
 
         const ts = Number(reminderTime)
@@ -994,9 +1062,8 @@ async function handleMenuAction(context, action, keyObj) {
         }
 
         if (!actualKeyObj || !actualKeyObj.key) {
-            if (context && context.ui && context.ui.notice) {
-                context.ui.notice('请先在插件设置中配置 xxtui API Key（beta）', 'err', 3200)
-            }
+            // 统一处理没有API Key的情况，使用自定义弹窗
+            await showApiKeyMissingDialog(context)
             return
         }
 
@@ -1029,9 +1096,8 @@ async function handlePushWithKeyPicker(context) {
         const allKeys = cfg.apiKeys || []
 
         if (!allKeys.length || !allKeys.some(k => k && k.key)) {
-            if (context && context.ui && context.ui.notice) {
-                context.ui.notice('暂无 API Key，请在设置中添加', 'err', 2600)
-            }
+            // 统一处理没有API Key的情况，使用自定义弹窗
+            await showApiKeyMissingDialog(context)
             return
         }
 
@@ -1203,7 +1269,26 @@ export async function openSettings(context) {
             '      <div>- [ ] 开会 @明天 下午3点</div>',
             '      <div>- [ ] 打电话 @2小时后</div>',
             '      <div style="margin-top:4px;">创建提醒仅处理包含 @时间 的未完成待办。</div>',
-            '      <div style="margin-top:4px;"><a href="https://www.xxtui.com/" target="_blank" rel="noopener noreferrer">打开 xxtui 官网</a></div>',
+            '    </div>',
+            '  </div>',
+            '  <div class="xt-row"><label>来源 from</label><input id="xtui-set-from" type="text" placeholder="飞速MarkDown"/></div>',
+            '  <div class="xt-row" style="flex-direction:column;align-items:stretch;">',
+            '    <div class="xt-keys">',
+            '      <div class="xt-keys-head">',
+            '        <div style="font-weight:600;color:#111827;">API Keys</div>',
+            '        <button class="xt-small-btn" id="xtui-add-key">新增 Key</button>',
+            '      </div>',
+            '      <div class="xt-keys-list" id="xtui-keys-list"></div>',
+            '    </div>',
+            '  </div>',
+            '  <div class="xt-row xt-help">',
+            '    <div class="xt-help-title">获取 API Key</div>',
+            '    <div class="xt-help-text">',
+            '      <div>方式一：扫描下方二维码关注公众号：</div>',
+            '      <div style="margin:10px 0;"><img src="https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket=gQE_8TwAAAAAAAAAAS5odHRwOi8vd2VpeGluLnFxLmNvbS9xLzAyZC1lUzE3VFVjcEYxMDAwMHcwM1YAAgTE1VdnAwQAAAAA" style="width:150px;height:150px;" alt="公众号二维码"></div>',
+            '      <div>在公众号底部菜单点击「更多」→「API_KEY总览」查看所有 Key</div>',
+            '      <div style="margin-top:10px;">方式二：<a href="https://www.xxtui.com/apiKey/overview" target="_blank" rel="noopener noreferrer">访问网页获取 API Key</a></div>',
+            '      <div style="margin-top:10px;">将获取到的 API Key 填入上方输入框中</div>',
             '    </div>',
             '  </div>',
             '  <div class="xt-row xt-help">',
@@ -1221,16 +1306,6 @@ export async function openSettings(context) {
             '      <div style="margin-left:12px;color:#64748b;">返回：{success: number, failed: number}</div>',
             '    </div>',
             '  </div>',
-            '  <div class="xt-row" style="flex-direction:column;align-items:stretch;">',
-            '    <div class="xt-keys">',
-            '      <div class="xt-keys-head">',
-            '        <div style="font-weight:600;color:#111827;">API Keys</div>',
-            '        <button class="xt-small-btn" id="xtui-add-key">新增 Key</button>',
-            '      </div>',
-            '      <div class="xt-keys-list" id="xtui-keys-list"></div>',
-            '    </div>',
-            '  </div>',
-            '  <div class="xt-row"><label>来源 from</label><input id="xtui-set-from" type="text" placeholder="飞速MarkDown"/></div>',
             ' </div>',
             ' <div id="xtui-set-actions"><button id="xtui-set-cancel">取消</button><button class="primary" id="xtui-set-ok">保存</button></div>',
             '</div>'
