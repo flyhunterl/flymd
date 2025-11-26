@@ -691,8 +691,7 @@ async function pushInstantBatch(context, cfg, todos, filterLabel, keyObj) {
     lines.push('')
     list.forEach((todo, idx) => {
         const content = String(todo && todo.content || '').trim() || '- [ ] 待办事项'
-        const lineNum = todo && todo.line ? '（行 ' + todo.line + '）' : ''
-        lines.push((idx + 1) + '. ' + content + lineNum)
+        lines.push((idx + 1) + '. ' + content)
     })
     lines.push('')
     lines.push('来源：' + ((cfg && cfg.from) || '飞速MarkDown'))
