@@ -1,7 +1,7 @@
 {
   "id": "xxtui-todo-push",
   "name": "xxtui 待办推送（beta）",
-  "version": "0.1.6-beta",
+  "version": "0.1.7-beta",
   "minHostVersion": "0.3.6",
   "author": "flyMD",
   "description": "解析选中文本的待办事项并推送到 xxtui，支持通过微信公众号获取 API Key（beta）",

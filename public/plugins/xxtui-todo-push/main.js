@@ -9,11 +9,19 @@
 // 配置存储键
 const CFG_KEY = 'xxtui.todo.config'
 
+// 弹窗提示状态存储键
+const PROMPT_STATUS_KEY = 'xxtui.todo.promptStatus'
+
 // 默认配置
 const DEFAULT_CFG = {
     apiKey: '', // 兼容旧版
     apiKeys: [], // { key: string, note?: string, isDefault?: boolean, channel?: string }[]
     from: '飞速MarkDown'
+}
+
+// 默认提示状态配置
+const DEFAULT_PROMPT_STATUS = {
+    showConvertTodoPrompt: true // 是否显示转换为待办的提示
 }
 
 // 记录菜单解绑函数（按 plugin.md 推荐的返回值清理方式）
@@ -355,6 +363,176 @@ function showConfirm(message) {
     })
 }
 
+// 自定义带"不再提示"选项的确认弹窗，返回 Promise<{ confirmed: boolean, dontShowAgain: boolean }>
+function showConfirmWithDontShowAgain(message, title = '确认操作') {
+    return new Promise((resolve) => {
+        try {
+            const doc = window && window.document ? window.document : null
+            if (!doc) throw new Error('NO_DOM')
+            ensureConfirmCss()
+
+            // 分离问题和提示信息
+            const parts = String(message || '').split('\n')
+            const question = parts[0] || ''
+            const info = parts.slice(1).join('\n') || ''
+
+            const overlay = doc.createElement('div')
+            overlay.id = 'xtui-confirm-overlay'
+            overlay.innerHTML = [
+                '<div id="xtui-confirm-dialog">',
+                ' <div id="xtui-confirm-head">' + title + '</div>',
+                ' <div id="xtui-confirm-body">',
+                '   <div style="margin-bottom:12px;font-weight:500;color:#0f172a;">' + question + '</div>',
+                info ? '   <div style="padding:10px 12px;background:#f1f5f9;border-radius:6px;font-size:13px;line-height:1.5;color:#475569;">' + info + '</div>' : '',
+                ' </div>',
+                ' <div style="padding:0 14px 10px;"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="xtui-confirm-dont-show-again" style="width:auto;height:auto;margin:0;">不再提示</label></div>',
+                ' <div id="xtui-confirm-actions">',
+                '   <button id="xtui-confirm-cancel">取消</button>',
+                '   <button class="primary" id="xtui-confirm-ok">确定</button>',
+                ' </div>',
+                '</div>'
+            ].join('')
+
+            const host = doc.body || doc.documentElement
+            host.appendChild(overlay)
+
+            const cleanup = (result) => {
+                try { overlay.remove() } catch {}
+                resolve(result)
+            }
+
+            const btnOk = overlay.querySelector('#xtui-confirm-ok')
+            const btnCancel = overlay.querySelector('#xtui-confirm-cancel')
+            const chkDontShowAgain = overlay.querySelector('#xtui-confirm-dont-show-again')
+
+            if (btnOk) {
+                btnOk.addEventListener('click', () => {
+                    const dontShowAgain = chkDontShowAgain && chkDontShowAgain.checked
+                    cleanup({ confirmed: true, dontShowAgain })
+                })
+            }
+
+            if (btnCancel) {
+                btnCancel.addEventListener('click', () => {
+                    const dontShowAgain = chkDontShowAgain && chkDontShowAgain.checked
+                    cleanup({ confirmed: false, dontShowAgain })
+                })
+            }
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    const dontShowAgain = chkDontShowAgain && chkDontShowAgain.checked
+                    cleanup({ confirmed: false, dontShowAgain })
+                }
+            })
+
+            const onKey = (e) => {
+                if (e.key === 'Escape') {
+                    const dontShowAgain = chkDontShowAgain && chkDontShowAgain.checked
+                    cleanup({ confirmed: false, dontShowAgain })
+                }
+                if (e.key === 'Enter') {
+                    const dontShowAgain = chkDontShowAgain && chkDontShowAgain.checked
+                    cleanup({ confirmed: true, dontShowAgain })
+                }
+            }
+            try { doc.addEventListener('keydown', onKey, { once: true }) } catch {}
+        } catch {
+            resolve({ confirmed: false, dontShowAgain: false })
+        }
+    })
+}
+
+// 将选中文本转换为待办事项格式
+async function convertSelectedTextToTodo(context, selectedText) {
+    try {
+        if (!context || !selectedText) return
+
+        // 加载提示状态
+        const promptStatus = await loadPromptStatus(context)
+
+        // 如果设置了不再显示提示，则跳过提示直接执行
+        if (!promptStatus.showConvertTodoPrompt) {
+            performConvertToTodo(context, selectedText)
+            return
+        }
+
+        // 显示带"不再提示"选项的确认弹窗
+        const result = await showConfirmWithDontShowAgain(
+            '是否将选中的文本转换为待办事项格式？\n每一行前面将会添加 "- [ ] " 前缀。',
+            '转换为待办事项'
+        )
+
+        // 如果用户选择了"不再提示"，则保存状态
+        if (result.dontShowAgain) {
+            await savePromptStatus(context, { showConvertTodoPrompt: false })
+        }
+
+        // 如果用户确认转换，则执行转换操作
+        if (result.confirmed) {
+            performConvertToTodo(context, selectedText)
+        }
+    } catch (err) {
+        log('转换为待办事项时出错', err)
+        if (context && context.ui && context.ui.notice) {
+            context.ui.notice('转换为待办事项时出错', 'err', 2600)
+        }
+    }
+}
+
+// 执行实际的转换操作
+function performConvertToTodo(context, selectedText) {
+    try {
+        if (!context || !selectedText) return
+
+        // 获取选中文本的每一行
+        const lines = selectedText.split(/\r?\n/)
+
+        // 为每一行添加 "- [ ] " 前缀
+        const convertedLines = lines.map(line => {
+            // 如果行已经是以 "- [ ]" 或 "- [x]" 开头，则不重复添加
+            if (/^\s*[-*]\s+\[(\s|x|X)\]/.test(line)) {
+                return line
+            }
+            // 如果行是空行，则保持原样
+            if (line.trim() === '') {
+                return line
+            }
+            // 为非空行添加前缀
+            return '- [ ] ' + line
+        })
+
+        // 重新组合文本
+        const convertedText = convertedLines.join('\n')
+
+        // 替换选中的文本
+        if (context.replaceSelection) {
+            context.replaceSelection(convertedText)
+        } else if (window.editor && typeof window.editor.replaceSelection === 'function') {
+            window.editor.replaceSelection(convertedText)
+        } else {
+            // 降级方案：使用 document.execCommand (可能不适用于所有编辑器)
+            try {
+                document.execCommand('insertText', false, convertedText)
+            } catch {
+                if (context.ui && context.ui.notice) {
+                    context.ui.notice('无法替换选中文本，请手动粘贴以下内容：\n' + convertedText, 'err', 4000)
+                }
+                return
+            }
+        }
+
+        if (context.ui && context.ui.notice) {
+            context.ui.notice('已将选中文本转换为待办事项格式', 'ok', 2000)
+        }
+    } catch (err) {
+        log('执行转换操作时出错', err)
+        if (context && context.ui && context.ui.notice) {
+            context.ui.notice('执行转换操作时出错', 'err', 2600)
+        }
+    }
+}
+
 // 自定义API Key缺失提示弹窗，提供打开设置窗口选项
 async function showApiKeyMissingDialog(context) {
     return new Promise((resolve) => {
@@ -462,6 +640,29 @@ async function saveCfg(context, cfg) {
             ? normalized.apiKeys.find((k) => k.isDefault)?.key || normalized.apiKeys[0].key
             : ''
         await context.storage.set(CFG_KEY, normalized)
+    } catch {
+        // 忽略存储错误
+    }
+}
+
+// 加载提示状态
+async function loadPromptStatus(context) {
+    try {
+        if (!context || !context.storage || !context.storage.get) return { ...DEFAULT_PROMPT_STATUS }
+        const raw = await context.storage.get(PROMPT_STATUS_KEY)
+        if (!raw || typeof raw !== 'object') return { ...DEFAULT_PROMPT_STATUS }
+        return { ...DEFAULT_PROMPT_STATUS, ...raw }
+    } catch {
+        return { ...DEFAULT_PROMPT_STATUS }
+    }
+}
+
+// 保存提示状态
+async function savePromptStatus(context, status) {
+    try {
+        if (!context || !context.storage || !context.storage.set) return
+        const normalized = { ...DEFAULT_PROMPT_STATUS, ...status }
+        await context.storage.set(PROMPT_STATUS_KEY, normalized)
     } catch {
         // 忽略存储错误
     }
@@ -1159,19 +1360,33 @@ async function registerContextMenus(context) {
 
     // 一级：创建提醒（使用默认 Key）
     const reminderDisposer = context.addContextMenuItem({
-            label: '创建提醒 (@时间)',
-            icon: '⏰',
-            condition,
-            onClick: (ctx) => {
-                if (!hasSelectedText(ctx.selectedText)) {
-                    showConfirm('请先选择要创建提醒的文本内容').then(() => {});
-                    return
-                }
-                handleMenuAction(context, MENU_ACTIONS.CREATE_REMINDER, defaultKey, ctx.selectedText)
+        label: '创建提醒 (@时间)',
+        icon: '⏰',
+        condition,
+        onClick: (ctx) => {
+            if (!hasSelectedText(ctx.selectedText)) {
+                showConfirm('请先选择要创建提醒的文本内容').then(() => {});
+                return
             }
-        })
+            handleMenuAction(context, MENU_ACTIONS.CREATE_REMINDER, defaultKey, ctx.selectedText)
+        }
+    })
 
-    ;[pushDisposer, reminderDisposer].forEach((d) => {
+    // 一级：转换为待办事项
+    const convertTodoDisposer = context.addContextMenuItem({
+        label: '转换为待办事项',
+        icon: '📝',
+        condition,
+        onClick: (ctx) => {
+            if (!hasSelectedText(ctx.selectedText)) {
+                showConfirm('请先选择要转换为待办事项的文本内容').then(() => {});
+                return
+            }
+            convertSelectedTextToTodo(context, ctx.selectedText)
+        }
+    })
+
+    ;[pushDisposer, reminderDisposer, convertTodoDisposer].forEach((d) => {
         if (typeof d === 'function') CTX_MENU_DISPOSERS.push(d)
     })
 
@@ -1360,6 +1575,13 @@ export async function openSettings(context) {
             '      <div style="margin-left:12px;color:#64748b;">返回：{success: number, failed: number}</div>',
             '    </div>',
             '  </div>',
+            '  <div class="xt-row xt-help">',
+            '    <div class="xt-help-title">提示设置</div>',
+            '    <div class="xt-help-text">',
+            '      <div style="margin-bottom:8px;">您可以重置提示状态，使转换为待办事项时重新显示确认提示：</div>',
+            '      <button class="xt-small-btn" id="xtui-reset-prompt-status">重置提示状态</button>',
+            '    </div>',
+            '  </div>',
             ' </div>',
             ' <div id="xtui-set-actions"><button id="xtui-set-cancel">取消</button><button class="primary" id="xtui-set-ok">保存</button></div>',
             '</div>'
@@ -1371,6 +1593,7 @@ export async function openSettings(context) {
         const elKeysList = overlay.querySelector('#xtui-keys-list')
         const elAddKey = overlay.querySelector('#xtui-add-key')
         const elFrom = overlay.querySelector('#xtui-set-from')
+        const elResetPromptStatus = overlay.querySelector('#xtui-reset-prompt-status')
 
         let keyList = ensureDefaultKey(cfg.apiKeys)
 
@@ -1445,6 +1668,22 @@ export async function openSettings(context) {
                 keyList.push({ key: '', note: '', channel: '', isDefault: needDefault })
                 keyList = ensureDefaultKey(keyList)
                 renderKeys()
+            })
+        }
+
+        // 重置提示状态按钮事件处理
+        if (elResetPromptStatus) {
+            elResetPromptStatus.addEventListener('click', async () => {
+                try {
+                    await savePromptStatus(context, { showConvertTodoPrompt: true })
+                    if (context.ui && context.ui.notice) {
+                        context.ui.notice('提示状态已重置，下次转换时将重新显示提示', 'ok', 2000)
+                    }
+                } catch (err) {
+                    if (context.ui && context.ui.notice) {
+                        context.ui.notice('重置提示状态失败', 'err', 2600)
+                    }
+                }
             })
         }
 
