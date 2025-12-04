@@ -1,4 +1,4 @@
-// xxtui 待办推送插件（beta）
+// xxtui 待办推送插件
 // 说明：
 // - 扫描当前文档中形如「- [ ] 任务内容」或「- [x] 任务内容」的行
 // - 菜单提供推送（全部/已完成/未完成）与创建提醒两个入口
@@ -15,8 +15,11 @@ const PROMPT_STATUS_KEY = 'xxtui.todo.promptStatus'
 // 默认配置
 const DEFAULT_CFG = {
     apiKey: '', // 兼容旧版
-    apiKeys: [], // { key: string, note?: string, isDefault?: boolean, channel?: string }[]
-    from: '飞速MarkDown'
+    apiKeys: [], // { key: string, note?: string, isDefault?: boolean, channel?: string }[],
+    from: '飞速MarkDown',
+    enableWriteback: true, // 推送/提醒后是否回写标记
+    pushFlag: '[pushed]', // 已推送标记文本
+    remindFlag: '[reminded]' // 已创建提醒标记文本
 }
 
 // 默认提示状态配置
@@ -34,6 +37,14 @@ const MENU_ACTIONS = {
     PUSH_DONE: 'push_done',
     PUSH_TODO: 'push_todo',
     CREATE_REMINDER: 'create_reminder'
+}
+
+// 待办状态标记（追加在行尾，便于下次跳过）
+const TODO_FLAG_PUSHED = 'pushed'
+const TODO_FLAG_REMINDED = 'reminded'
+const TODO_FLAG_MAP = {
+    [TODO_FLAG_PUSHED]: '[pushed]',
+    [TODO_FLAG_REMINDED]: '[reminded]'
 }
 
 // 日志开关，置为 true 可在控制台查看调试信息
@@ -98,10 +109,17 @@ function ensureXxtuiCss() {
         css.id = 'xtui-todo-style'
         css.textContent = [
             '#xtui-set-overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;z-index:2147483600;}',
-            '#xtui-set-dialog{width:600px;max-width:92vw;max-height:90vh;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,system-ui;display:flex;flex-direction:column;}',
+            '#xtui-set-dialog{width:720px;max-width:96vw;height:620px;max-height:90vh;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,system-ui;display:flex;flex-direction:column;}',
             '#xtui-set-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;}',
             '#xtui-set-head button{border:none;background:transparent;cursor:pointer;font-size:14px;color:#6b7280;}',
-            '#xtui-set-body{padding:12px;overflow-y:auto;flex:1;}',
+            '#xtui-set-body{padding:0;display:flex;min-height:420px;flex:1;overflow:hidden;}',
+            '#xtui-set-nav{width:168px;background:#f9fafb;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;padding:10px 8px;gap:6px;box-sizing:border-box;}',
+            '.xtui-nav-btn{border:1px solid transparent;border-radius:10px;background:transparent;padding:8px 10px;text-align:left;font-size:13px;color:#334155;cursor:pointer;transition:all .15s;}',
+            '.xtui-nav-btn:hover{background:#eef2ff;border-color:#dfe3f3;}',
+            '.xtui-nav-btn.active{background:#2563eb;color:#fff;border-color:#2563eb;box-shadow:0 6px 16px rgba(37,99,235,0.18);}',
+            '#xtui-set-panel{flex:1;padding:12px;overflow:auto;box-sizing:border-box;}',
+            '.xtui-tab{display:none;}',
+            '.xtui-tab.active{display:block;}',
             '.xt-row{display:flex;align-items:center;gap:10px;margin:8px 0;}',
             '.xt-row label{width:110px;color:#334155;font-size:13px;}',
             '.xt-row input,.xt-row select,.xt-row textarea{flex:1;background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:8px;padding:6px 10px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,system-ui;box-sizing:border-box;}',
@@ -359,7 +377,7 @@ function showConfirm(message) {
             overlay.id = 'xtui-confirm-overlay'
             overlay.innerHTML = [
                 '<div id="xtui-confirm-dialog">',
-                ' <div id="xtui-confirm-head">确认操作</div>',
+                ' <div id="xtui-confirm-head">提示</div>',
                 ' <div id="xtui-confirm-body"></div>',
                 ' <div id="xtui-confirm-actions">',
                 '   <button id="xtui-confirm-cancel">取消</button>',
@@ -391,6 +409,65 @@ function showConfirm(message) {
             try { doc.addEventListener('keydown', onKey, { once: true }) } catch {}
         } catch {
             resolve(false)
+        }
+    })
+}
+
+// 带复选框的确认弹窗，返回 Promise<{confirmed:boolean, checked:boolean}>
+function showConfirmWithCheckbox(message, checkboxLabel, defaultChecked = false) {
+    return new Promise((resolve) => {
+        try {
+            const doc = window && window.document ? window.document : null
+            if (!doc) throw new Error('NO_DOM')
+            ensureConfirmCss()
+
+            const overlay = doc.createElement('div')
+            overlay.id = 'xtui-confirm-overlay'
+            overlay.innerHTML = [
+                '<div id="xtui-confirm-dialog">',
+                ' <div id="xtui-confirm-head">提示</div>',
+                ' <div id="xtui-confirm-body"></div>',
+                ' <div style="padding:12px 14px;border-top:1px solid #e5e7eb;">',
+                '   <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;">',
+                '     <input id="xtui-confirm-checkbox" type="checkbox" style="margin:0;" />',
+                '     <span id="xtui-confirm-checkbox-text"></span>',
+                '   </label>',
+                ' </div>',
+                ' <div id="xtui-confirm-actions">',
+                '   <button id="xtui-confirm-cancel">取消</button>',
+                '   <button class="primary" id="xtui-confirm-ok">确定</button>',
+                ' </div>',
+                '</div>'
+            ].join('')
+
+            const body = overlay.querySelector('#xtui-confirm-body')
+            if (body) body.textContent = String(message || '')
+
+            const cb = overlay.querySelector('#xtui-confirm-checkbox')
+            if (cb) cb.checked = !!defaultChecked
+            const cbText = overlay.querySelector('#xtui-confirm-checkbox-text')
+            if (cbText) cbText.textContent = checkboxLabel || '强制执行'
+
+            const host = doc.body || doc.documentElement
+            host.appendChild(overlay)
+
+            const cleanup = (ret) => {
+                try { overlay.remove() } catch {}
+                resolve(ret)
+            }
+
+            const btnOk = overlay.querySelector('#xtui-confirm-ok')
+            const btnCancel = overlay.querySelector('#xtui-confirm-cancel')
+            if (btnOk) btnOk.addEventListener('click', () => cleanup({ confirmed: true, checked: cb ? cb.checked : false }))
+            if (btnCancel) btnCancel.addEventListener('click', () => cleanup({ confirmed: false, checked: cb ? cb.checked : false }))
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup({ confirmed: false, checked: cb ? cb.checked : false }) })
+            const onKey = (e) => {
+                if (e.key === 'Escape') cleanup({ confirmed: false, checked: cb ? cb.checked : false })
+                if (e.key === 'Enter') cleanup({ confirmed: true, checked: cb ? cb.checked : false })
+            }
+            try { doc.addEventListener('keydown', onKey, { once: true }) } catch {}
+        } catch {
+            resolve({ confirmed: false, checked: false })
         }
     })
 }
@@ -754,8 +831,176 @@ function describeKey(item) {
     return item.note ? item.note + ' (' + tail + ')' : 'Key ' + tail
 }
 
+function escapeRegExp(str) {
+    return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getFlagTexts(cfg) {
+    const pushFlag = (cfg && cfg.pushFlag) ? String(cfg.pushFlag).trim() : TODO_FLAG_MAP[TODO_FLAG_PUSHED]
+    const remindFlag = (cfg && cfg.remindFlag) ? String(cfg.remindFlag).trim() : TODO_FLAG_MAP[TODO_FLAG_REMINDED]
+    return {
+        [TODO_FLAG_PUSHED]: pushFlag || TODO_FLAG_MAP[TODO_FLAG_PUSHED],
+        [TODO_FLAG_REMINDED]: remindFlag || TODO_FLAG_MAP[TODO_FLAG_REMINDED]
+    }
+}
+
+// 解析标题末尾的标记，返回纯标题与状态
+function parseTitleAndFlags(title, cfg) {
+    const res = {
+        text: String(title || '').trim(),
+        pushed: false,
+        reminded: false
+    }
+    const flags = getFlagTexts(cfg)
+    const reg = new RegExp(
+        '\\s+(' + escapeRegExp(flags[TODO_FLAG_PUSHED]) + '|' + escapeRegExp(flags[TODO_FLAG_REMINDED]) + ')\\s*$',
+        'i'
+    )
+    let cur = res.text
+    let m = reg.exec(cur)
+    while (m) {
+        const flag = (m[1] || '').toLowerCase()
+        if (flag === flags[TODO_FLAG_PUSHED].toLowerCase()) res.pushed = true
+        if (flag === flags[TODO_FLAG_REMINDED].toLowerCase()) res.reminded = true
+        cur = cur.slice(0, m.index).trimEnd()
+        m = reg.exec(cur)
+    }
+    res.text = cur
+    return res
+}
+
+// 将行尾标记解析出来并追加新的标记
+function addFlagsToLine(line, flagKeys, cfg) {
+    const flags = getFlagTexts(cfg)
+    const keys = Array.isArray(flagKeys) ? flagKeys.filter(Boolean) : [flagKeys].filter(Boolean)
+    if (!keys.length) return line
+    let base = String(line || '')
+    const reg = new RegExp(
+        '\\s+(' + escapeRegExp(flags[TODO_FLAG_PUSHED]) + '|' + escapeRegExp(flags[TODO_FLAG_REMINDED]) + ')\\s*$',
+        'i'
+    )
+    const exist = []
+    let m = reg.exec(base)
+    while (m) {
+        const flagLower = (m[1] || '').toLowerCase()
+        if (flagLower === flags[TODO_FLAG_PUSHED].toLowerCase()) exist.unshift(TODO_FLAG_PUSHED)
+        else if (flagLower === flags[TODO_FLAG_REMINDED].toLowerCase()) exist.unshift(TODO_FLAG_REMINDED)
+        base = base.slice(0, m.index).trimEnd()
+        m = reg.exec(base)
+    }
+    const merged = exist.slice()
+    keys.forEach((k) => {
+        const key = String(k).toLowerCase()
+        if (merged.indexOf(key) < 0) merged.push(key)
+    })
+    const tail = merged
+        .map((k) => flags[k] || TODO_FLAG_MAP[k] || '[' + k + ']')
+        .join(' ')
+    return tail ? (base.trimEnd() + ' ' + tail) : base
+}
+
+// 在文本块中为指定待办行追加标记
+function applyFlagsToContent(content, todos, flagKeys, cfg) {
+    const lines = String(content || '').split(/\r?\n/)
+    const targets = new Set(
+        Array.isArray(todos)
+            ? todos.map((t) => (t && t.line ? Number(t.line) : 0)).filter(Boolean)
+            : []
+    )
+    if (!targets.size) return content
+    for (let i = 0; i < lines.length; i++) {
+        const ln = i + 1
+        if (!targets.has(ln)) continue
+        lines[i] = addFlagsToLine(lines[i], flagKeys, cfg)
+    }
+    return lines.join('\n')
+}
+
+function normalizeTodoKey(todo) {
+    if (!todo) return ''
+    const title = String(todo.title || '').trim()
+    const status = todo.done ? '1' : '0'
+    return status + '|' + title
+}
+
+// 将标记写回编辑器（优先更新选区，如不支持则回退到全文定位匹配）
+function writeBackTodoFlags(context, opts) {
+    try {
+        if (!context) return
+        const { baseContent, useSelection, todos, flagKeys } = opts || {}
+        if (!Array.isArray(todos) || !todos.length) return
+
+        // 1) 选区直接替换（最快，不影响全文）
+        if (useSelection && baseContent) {
+            const nextContent = applyFlagsToContent(baseContent, todos, flagKeys, opts.cfg)
+            if (context.replaceSelection) {
+                context.replaceSelection(nextContent)
+                return
+            } else if (window.editor && typeof window.editor.replaceSelection === 'function') {
+                window.editor.replaceSelection(nextContent)
+                return
+            }
+        }
+
+        // 2) 选区定位到全文再写回：计算选区在全文中的起始行，精确标记
+        const fullContent = context.getEditorValue ? context.getEditorValue() : null
+        if (useSelection && baseContent && fullContent) {
+            const idx = fullContent.indexOf(baseContent)
+            if (idx >= 0) {
+                const preLines = idx === 0 ? 0 : fullContent.slice(0, idx).split(/\r?\n/).length - 1
+                const shiftedTodos = todos.map((t) => ({
+                    ...t,
+                    line: (t && t.line ? t.line : 0) + preLines
+                }))
+                const updated = applyFlagsToContent(fullContent, shiftedTodos, flagKeys, opts.cfg)
+                if (context.setEditorValue) {
+                    context.setEditorValue(updated)
+                    return
+                } else if (window.editor && typeof window.editor.setValue === 'function') {
+                    window.editor.setValue(updated)
+                    return
+                }
+            }
+        }
+
+        // 3) 回退到全文：通过标题+完成状态匹配对应行，避免遗漏
+        if (!fullContent) {
+            log('缺少 getEditorValue，无法回退写回标记')
+            return
+        }
+        const docTodos = extractTodos(fullContent)
+        const docUsed = new Set()
+        const matched = []
+
+        for (const todo of todos) {
+            const key = normalizeTodoKey(todo)
+            const idx = docTodos.findIndex((d, i) => !docUsed.has(i) && normalizeTodoKey(d) === key)
+            if (idx >= 0) {
+                matched.push(docTodos[idx])
+                docUsed.add(idx)
+            }
+        }
+
+        if (!matched.length) {
+            log('未找到可写回的待办行，可能文档已变更')
+            return
+        }
+
+        const updatedContent = applyFlagsToContent(fullContent, matched, flagKeys, opts.cfg)
+        if (context.setEditorValue) {
+            context.setEditorValue(updatedContent)
+        } else if (window.editor && typeof window.editor.setValue === 'function') {
+            window.editor.setValue(updatedContent)
+        } else {
+            log('缺少 setEditorValue，无法写回全文标记')
+        }
+    } catch (err) {
+        log('写回标记失败', err)
+    }
+}
+
 // 从文档内容中提取所有待办（识别「- [ ] 文本」/「- [x] 文本」以及 * 列表）
-function extractTodos(text) {
+function extractTodos(text, cfg) {
     const src = String(text || '')
     const lines = src.split(/\r?\n/)
     const out = []
@@ -765,14 +1010,17 @@ function extractTodos(text) {
         if (!raw) continue
         const m = raw.match(/^\s*[-*]\s+\[(\s|x|X)\]\s+(.+)$/)
         if (!m) continue
-        const title = String(m[2] || '').trim()
+        const parsed = parseTitleAndFlags(m[2], cfg)
+        const title = parsed.text
         if (!title) continue
         const marker = String(m[1] || '').trim().toLowerCase()
         out.push({
             title,
             content: raw,
             line: i + 1,
-            done: marker === 'x'
+            done: marker === 'x',
+            pushed: parsed.pushed,
+            reminded: parsed.reminded
         })
     }
 
@@ -923,8 +1171,8 @@ async function pushInstantBatch(context, cfg, todos, filterLabel, keyObj) {
     lines.push('提醒列表（' + label + '，共 ' + list.length + ' 条）：')
     lines.push('')
     list.forEach((todo, idx) => {
-        const content = String(todo && todo.content || '').trim() || '- [ ] 待办事项'
-        lines.push((idx + 1) + '. ' + content)
+        const text = String(todo && todo.title || '').trim() || '- [ ] 待办事项'
+        lines.push((idx + 1) + '. ' + todoStatusTag(todo) + ' ' + text)
     })
     lines.push('')
     lines.push('来源：' + ((cfg && cfg.from) || '飞速MarkDown'))
@@ -963,11 +1211,10 @@ async function pushScheduledTodo(context, cfg, todo, keyObj) {
     if (!ts || !Number.isFinite(ts)) throw new Error('BAD_TIME')
 
     const url = 'https://www.xxtui.com/scheduled/reminder/' + encodeURIComponent(key)
-    const content = String(todo && todo.content || '').trim()
     const text = String(todo && todo.title || '').trim()
     const title = '[TODO] ' + (text || '待办事项')
     const lines = []
-    const mainText = content || text || '- [ ] 待办事项'
+    const mainText = (todoStatusTag(todo) + ' ' + (text || '待办事项')).trim()
     lines.push('提醒内容:')
     lines.push(mainText)
     // 追加具体提醒时间
@@ -1018,7 +1265,7 @@ async function runPushFlow(context, cfg, type, keyObj, selectedText) {
 
     // 如果提供了选中的文本，则只解析选中的文本；否则解析全文
     const content = selectedText || context.getEditorValue()
-    const allTodos = extractTodos(content)
+    const allTodos = extractTodos(content, cfg)
     log('解析到待办数量', allTodos.length)
     if (!allTodos.length) {
         if (context && context.ui && context.ui.notice) {
@@ -1036,19 +1283,52 @@ async function runPushFlow(context, cfg, type, keyObj, selectedText) {
     }
 
     const label = describeFilter(type)
-    const confirmText = '检测到 ' + filtered.length + ' 条' + label + '待办，是否推送到 xxtui？（beta）'
-    const okConfirm = await showConfirm(confirmText)
-    if (!okConfirm) return
+    const pushedMarked = filtered.filter((item) => item && item.pushed)
+    const unpushed = filtered.filter((item) => item && !item.pushed)
+
+    const hasMarked = pushedMarked.length > 0
+    const hasUnmarked = unpushed.length > 0
+    const confirmText =
+        '检测到 ' +
+        filtered.length +
+        ' 条' +
+        label +
+        '待办。\n' +
+        (hasMarked
+            ? '其中 ' + pushedMarked.length + ' 条已标记为已推送，默认只推送未标记的。'
+            : '未发现已推送标记，将推送全部。')
+
+    const { confirmed, checked } = await showConfirmWithCheckbox(confirmText, '强制推送（包含已标记）', false)
+    if (!confirmed) return
+
+    const forcePush = !!checked
+    const target = forcePush ? filtered : unpushed
+
+    if (!target.length) {
+        if (context && context.ui && context.ui.notice) {
+            context.ui.notice('目标待办均已标记，可勾选“强制推送”后发送', 'err', 3200)
+        }
+        return
+    }
 
     try {
-        await pushInstantBatch(context, cfg, filtered, label, keyObj)
+        await pushInstantBatch(context, cfg, target, label, keyObj)
         if (context && context.ui && context.ui.notice) {
-            context.ui.notice('xxtui 推送完成：已发送 ' + filtered.length + ' 条（beta）', 'ok', 3600)
+            context.ui.notice('xxtui 推送完成：已发送 ' + target.length + ' 条', 'ok', 3600)
+        }
+        if (cfg.enableWriteback !== false) {
+            writeBackTodoFlags(context, {
+                baseContent: content,
+                useSelection: !!selectedText,
+                todos: target,
+                flagKeys: [TODO_FLAG_PUSHED],
+                cfg
+            })
         }
     } catch (err) {
         const msg = err && err.message ? String(err.message) : '推送失败'
         if (context && context.ui && context.ui.notice) {
-            context.ui.notice('xxtui 推送失败：' + msg + '（beta）', 'err', 3600)
+            context.ui.notice('xxtui 推送失败：' + msg, 'err', 3600)
         }
     }
 }
@@ -1065,7 +1345,7 @@ async function runReminderFlow(context, cfg, keyObj, selectedText) {
 
     // 如果提供了选中的文本，则只解析选中的文本；否则解析全文
     const content = selectedText || context.getEditorValue()
-    const allTodos = extractTodos(content)
+    const allTodos = extractTodos(content, cfg)
     log('解析到待办数量（提醒）', allTodos.length)
     if (!allTodos.length) {
         if (context && context.ui && context.ui.notice) {
@@ -1096,33 +1376,65 @@ async function runReminderFlow(context, cfg, keyObj, selectedText) {
     log('可创建提醒的待办数', scheduled.length)
 
     if (!scheduled.length) {
+        await showConfirm('未找到包含有效时间（@...）的未完成待办，无法创建定时提醒')
+        return
+    }
+
+    const remindedMarked = scheduled.filter((item) => item && item.reminded)
+    const unreminded = scheduled.filter((item) => item && !item.reminded)
+
+    const hasMarked = remindedMarked.length > 0
+    const hasUnmarked = unreminded.length > 0
+
+    const confirmText =
+        '检测到 ' +
+        scheduled.length +
+        ' 条包含时间的未完成待办。\n' +
+        (hasMarked
+            ? '其中 ' + remindedMarked.length + ' 条已标记为已创建提醒，默认只创建未标记的。'
+            : '未发现已创建标记，将为全部创建提醒。')
+
+    const { confirmed, checked } = await showConfirmWithCheckbox(confirmText, '强制创建提醒（包含已标记）', false)
+    if (!confirmed) return
+
+    const forceReminder = !!checked
+    const target = forceReminder ? scheduled : unreminded
+
+    if (!target.length) {
         if (context && context.ui && context.ui.notice) {
-            context.ui.notice('未找到包含有效时间（@...）的未完成待办，无法创建定时提醒（beta）', 'err', 3600)
+            context.ui.notice('目标待办均已标记，可勾选“强制创建”后继续', 'err', 3200)
         }
         return
     }
 
-    const okConfirm = await showConfirm(
-        '检测到 ' + scheduled.length + ' 条包含时间的未完成待办，是否创建 xxtui 定时提醒？（beta）'
-    )
-    if (!okConfirm) return
-
     let okCount = 0
     let failCount = 0
-    for (const todo of scheduled) {
+    const successTodos = []
+    for (const todo of target) {
         try {
             await pushScheduledTodo(context, cfg, todo, keyObj)
             okCount++
+            successTodos.push(todo)
         } catch {
             failCount++
         }
     }
 
     const msgSchedule = failCount
-        ? 'xxtui 定时提醒创建完成：成功 ' + okCount + ' 条，失败 ' + failCount + ' 条（beta）'
-        : 'xxtui 定时提醒创建完成：成功 ' + okCount + ' 条（beta）'
+        ? 'xxtui 定时提醒创建完成：成功 ' + okCount + ' 条，失败 ' + failCount + ' 条'
+        : 'xxtui 定时提醒创建完成：成功 ' + okCount + ' 条'
     if (context && context.ui && context.ui.notice) {
         context.ui.notice(msgSchedule, failCount ? 'err' : 'ok', 4000)
+    }
+
+    if (successTodos.length && cfg.enableWriteback !== false) {
+        writeBackTodoFlags(context, {
+            baseContent: content,
+            useSelection: !!selectedText,
+            todos: successTodos,
+            flagKeys: [TODO_FLAG_REMINDED],
+            cfg
+        })
     }
 }
 
@@ -1232,8 +1544,9 @@ async function parseAndCreateReminders(content) {
     try {
         if (!PLUGIN_CONTEXT) throw new Error('Plugin not initialized')
 
-        const allTodos = extractTodos(content)
-        const pending = allTodos.filter((item) => item && !item.done)
+        const cfg = await loadCfg(PLUGIN_CONTEXT)
+        const allTodos = extractTodos(content, cfg)
+        const pending = allTodos.filter((item) => item && !item.done && !item.reminded)
 
         if (!pending.length) {
             log('API解析提醒：无未完成待办')
@@ -1326,7 +1639,7 @@ async function handleMenuAction(context, action, keyObj, selectedText) {
     } catch (e) {
         const msg = e && e.message ? String(e.message) : String(e || '未知错误')
         if (context && context.ui && context.ui.notice) {
-            context.ui.notice('xxtui 待办操作失败：' + msg + '（beta）', 'err', 4000)
+            context.ui.notice('xxtui 待办操作失败：' + msg, 'err', 4000)
         }
         log('处理菜单动作异常', e)
     }
@@ -1443,7 +1756,7 @@ export function activate(context) {
     try {
         REMOVE_TOP_MENU = context.addMenuItem({
             label: '待办',
-            title: '推送或创建 xxtui 提醒（beta）',
+            title: '推送或创建 xxtui 提醒',
             children: [
                 { type: 'group', label: '推送' },
                 {
@@ -1560,57 +1873,86 @@ export async function openSettings(context) {
             '<div id="xtui-set-dialog">',
             ' <div id="xtui-set-head"><div id="xtui-set-title">xxtui 待办推送 设置</div><button id="xtui-set-close" title="关闭">×</button></div>',
             ' <div id="xtui-set-body">',
-            '  <div class="xt-row xt-help">',
-            '    <div class="xt-help-title">用法示例</div>',
-            '    <div class="xt-help-text">',
-            '      <div>- [ ] 写周报 @2025-11-21 09:00</div>',
-            '      <div>- [ ] 开会 @明天 下午3点</div>',
-            '      <div>- [ ] 打电话 @2小时后</div>',
-            '      <div style="margin-top:4px;">创建提醒仅处理包含 @时间 的未完成待办。</div>',
-            '    </div>',
-            '  </div>',
-            '  <div class="xt-row"><label>来源 from</label><input id="xtui-set-from" type="text" placeholder="飞速MarkDown"/></div>',
-            '  <div class="xt-row" style="flex-direction:column;align-items:stretch;">',
-            '    <div class="xt-keys">',
-            '      <div class="xt-keys-head">',
-            '        <div style="font-weight:600;color:#111827;">API Keys</div>',
-            '        <button class="xt-small-btn" id="xtui-add-key">新增 Key</button>',
-            '      </div>',
-            '      <div class="xt-keys-list" id="xtui-keys-list"></div>',
-            '    </div>',
-            '  </div>',
-            '  <div class="xt-row xt-help">',
-            '    <div class="xt-help-title">获取 API Key</div>',
-            '    <div class="xt-help-text">',
-            '      <div>方式一：扫描下方二维码关注公众号：</div>',
-            '      <div style="margin:10px 0;"><img src="https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket=gQE_8TwAAAAAAAAAAS5odHRwOi8vd2VpeGluLnFxLmNvbS9xLzAyZC1lUzE3VFVjcEYxMDAwMHcwM1YAAgTE1VdnAwQAAAAA" style="width:150px;height:150px;" alt="公众号二维码"></div>',
-            '      <div>在公众号底部菜单点击「更多」→「API_KEY总览」查看所有 Key</div>',
-            '      <div style="margin-top:10px;">方式二：<a href="https://www.xxtui.com/apiKey/overview" target="_blank" rel="noopener noreferrer">访问网页获取 API Key</a></div>',
-            '      <div style="margin-top:10px;">将获取到的 API Key 填入上方输入框中</div>',
-            '    </div>',
-            '  </div>',
-            '  <div class="xt-row xt-help">',
-            '    <div class="xt-help-title">插件 API（供其他插件调用）</div>',
-            '    <div class="xt-help-text" style="font-size:12px;line-height:1.6;">',
-            '      <div style="margin-bottom:6px;font-weight:600;color:#111827;">其他插件可通过以下方式获取并调用本插件 API：</div>',
-            '      <code style="display:block;background:#f1f5f9;padding:8px;border-radius:4px;margin-bottom:8px;overflow-x:auto;white-space:pre;">const api = context.getPluginAPI(\'xxtui-todo-push\')</code>',
-            '      <div style="margin-top:8px;font-weight:600;color:#111827;">提供的 3 个 API：</div>',
-            '      <div style="margin-top:4px;"><strong>1. pushToXxtui(title, content)</strong> - 推送消息</div>',
-            '      <div style="margin-left:12px;color:#64748b;">推送到默认 Key，from 取自设置项（默认：飞速MarkDown）</div>',
-            '      <div style="margin-top:4px;"><strong>2. createReminder(title, content, reminderTime)</strong> - 创建提醒</div>',
-            '      <div style="margin-left:12px;color:#64748b;">reminderTime 为秒级时间戳，使用默认 Key</div>',
-            '      <div style="margin-top:4px;"><strong>3. parseAndCreateReminders(content)</strong> - 解析并创建提醒</div>',
-            '      <div style="margin-left:12px;color:#64748b;">自动解析 Markdown 内容中的待办（- [ ] 任务 @时间），批量创建提醒</div>',
-            '      <div style="margin-left:12px;color:#64748b;">返回：{success: number, failed: number}</div>',
-            '    </div>',
-            '  </div>',
-            '  <div class="xt-row xt-help">',
-            '    <div class="xt-help-title">提示设置</div>',
-            '    <div class="xt-help-text">',
-            '      <div style="margin-bottom:8px;">您可以重置提示状态，使转换为待办事项时重新显示确认提示：</div>',
-            '      <button class="xt-small-btn" id="xtui-reset-prompt-status">重置提示状态</button>',
-            '    </div>',
-            '  </div>',
+            '   <div id="xtui-set-nav">',
+            '     <button class="xtui-nav-btn active" data-tab="push">推送设置</button>',
+            '     <button class="xtui-nav-btn" data-tab="plugin">插件设置</button>',
+            '     <button class="xtui-nav-btn" data-tab="docs">文档</button>',
+            '     <button class="xtui-nav-btn" data-tab="api">插件 API</button>',
+            '   </div>',
+            '   <div id="xtui-set-panel">',
+            '     <div class="xtui-tab active" data-tab="push">',
+            '       <div class="xt-row"><label>来源 from</label><input id="xtui-set-from" type="text" placeholder="飞速MarkDown"/></div>',
+            '       <div class="xt-row" style="flex-direction:column;align-items:stretch;">',
+            '         <div class="xt-keys">',
+            '           <div class="xt-keys-head">',
+            '             <div style="font-weight:600;color:#111827;">API Keys</div>',
+            '             <button class="xt-small-btn" id="xtui-add-key">新增 Key</button>',
+            '           </div>',
+            '           <div class="xt-keys-list" id="xtui-keys-list"></div>',
+            '         </div>',
+            '       </div>',
+            '       <div class="xt-row xt-help">',
+            '         <div class="xt-help-title">获取 API Key</div>',
+            '         <div class="xt-help-text">',
+            '           <div>方式一：扫描下方二维码关注公众号：</div>',
+            '           <div style="margin:10px 0;"><img src="https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket=gQE_8TwAAAAAAAAAAS5odHRwOi8vd2VpeGluLnFxLmNvbS9xLzAyZC1lUzE3VFVjcEYxMDAwMHcwM1YAAgTE1VdnAwQAAAAA" style="width:150px;height:150px;" alt="公众号二维码"></div>',
+            '           <div>在公众号底部菜单点击「更多」→「API_KEY总览」查看所有 Key</div>',
+            '           <div style="margin-top:10px;">方式二：<a href="https://www.xxtui.com/apiKey/overview" target="_blank" rel="noopener noreferrer">访问网页获取 API Key</a></div>',
+            '           <div style="margin-top:10px;">将获取到的 API Key 填入上方输入框中</div>',
+            '         </div>',
+            '       </div>',
+            '     </div>',
+            '     <div class="xtui-tab" data-tab="plugin">',
+            '       <div class="xt-row" style="align-items:center;gap:12px;">',
+            '         <label style="width:90px;color:#334155;font-size:13px;">是否回写标记</label>',
+            '         <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#111827;white-space:nowrap;">',
+            '           <input id="xtui-enable-writeback" type="checkbox" style="width:16px;height:16px;"/>',
+            '           <span>推送/提醒后写入状态标记</span>',
+            '         </label>',
+            '       </div>',
+            '       <div class="xt-row" style="align-items:center;gap:12px;">',
+            '         <label style="width:90px;color:#334155;font-size:13px;">推送标记</label>',
+            '         <input id="xtui-flag-push" type="text" style="width:160px;" placeholder="[pushed]" />',
+            '       </div>',
+            '       <div class="xt-row" style="align-items:center;gap:12px;">',
+            '         <label style="width:90px;color:#334155;font-size:13px;">创建提醒标记</label>',
+            '         <input id="xtui-flag-remind" type="text" style="width:160px;" placeholder="[reminded]" />',
+            '       </div>',
+            '       <div class="xt-row" style="align-items:center;gap:12px;padding-top:6px;">',
+            '         <label style="width:90px;color:#334155;font-size:13px;">提示设置</label>',
+            '         <button class="xt-small-btn" id="xtui-reset-prompt-status">重置转换提示</button>',
+            '         <span style="color:#94a3b8;font-size:12px;">恢复“转换为待办”确认弹窗</span>',
+            '       </div>',
+            '     </div>',
+            '     <div class="xtui-tab" data-tab="docs">',
+            '       <div class="xt-row xt-help">',
+            '         <div class="xt-help-title">用法示例</div>',
+            '         <div class="xt-help-text">',
+            '           <div>- [ ] 写周报 @2025-11-21 09:00</div>',
+            '           <div>- [ ] 开会 @明天 下午3点</div>',
+            '           <div>- [ ] 打电话 @2小时后</div>',
+            '           <div style="margin-top:4px;">创建提醒仅处理包含 @时间 的未完成待办。</div>',
+            '         </div>',
+            '       </div>',
+            '     </div>',
+            '     <div class="xtui-tab" data-tab="api">',
+            '       <div class="xt-row xt-help">',
+            '         <div class="xt-help-title">插件 API（供其他插件调用）</div>',
+            '         <div class="xt-help-text" style="font-size:12px;line-height:1.6;">',
+            '           <div style="margin-bottom:6px;font-weight:600;color:#111827;">其他插件可通过以下方式获取并调用本插件 API：</div>',
+            '           <code style="display:block;background:#f1f5f9;padding:8px;border-radius:4px;margin-bottom:8px;overflow-x:auto;white-space:pre;">const api = context.getPluginAPI(\'xxtui-todo-push\')</code>',
+            '           <div style="margin-top:8px;font-weight:600;color:#111827;">提供的 3 个 API：</div>',
+            '           <div style="margin-top:4px;"><strong>1. pushToXxtui(title, content)</strong> - 推送消息</div>',
+            '           <div style="margin-left:12px;color:#64748b;">推送到默认 Key，from 取自设置项（默认：飞速MarkDown）</div>',
+            '           <div style="margin-top:4px;"><strong>2. createReminder(title, content, reminderTime)</strong> - 创建提醒</div>',
+            '           <div style="margin-left:12px;color:#64748b;">reminderTime 为秒级时间戳，使用默认 Key</div>',
+            '           <div style="margin-top:4px;"><strong>3. parseAndCreateReminders(content)</strong> - 解析并创建提醒</div>',
+            '           <div style="margin-left:12px;color:#64748b;">自动解析 Markdown 内容中的待办（- [ ] 任务 @时间），批量创建提醒</div>',
+            '           <div style="margin-left:12px;color:#64748b;">返回：{success: number, failed: number}</div>',
+            '         </div>',
+            '       </div>',
+            '     </div>',
+            '   </div>',
             ' </div>',
             ' <div id="xtui-set-actions"><button id="xtui-set-cancel">取消</button><button class="primary" id="xtui-set-ok">保存</button></div>',
             '</div>'
@@ -1619,10 +1961,24 @@ export async function openSettings(context) {
         const host = doc.body || doc.documentElement
         host.appendChild(overlay)
 
+        // Tab 切换
+        const navBtns = overlay.querySelectorAll('.xtui-nav-btn')
+        const tabs = overlay.querySelectorAll('.xtui-tab')
+        navBtns.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const tab = btn.getAttribute('data-tab')
+                navBtns.forEach((b) => b.classList.toggle('active', b === btn))
+                tabs.forEach((p) => p.classList.toggle('active', p.getAttribute('data-tab') === tab))
+            })
+        })
+
         const elKeysList = overlay.querySelector('#xtui-keys-list')
         const elAddKey = overlay.querySelector('#xtui-add-key')
         const elFrom = overlay.querySelector('#xtui-set-from')
+        const elWriteback = overlay.querySelector('#xtui-enable-writeback')
         const elResetPromptStatus = overlay.querySelector('#xtui-reset-prompt-status')
+        const elFlagPush = overlay.querySelector('#xtui-flag-push')
+        const elFlagRemind = overlay.querySelector('#xtui-flag-remind')
 
         let keyList = ensureDefaultKey(cfg.apiKeys)
 
@@ -1675,7 +2031,16 @@ export async function openSettings(context) {
                 radioWrap.appendChild(rLabel)
 
                 const btnDel = doc.createElement('button')
-                btnDel.textContent = '删除'
+                btnDel.textContent = '×'
+                btnDel.style.width = '28px'
+                btnDel.style.height = '28px'
+                btnDel.style.display = 'flex'
+                btnDel.style.alignItems = 'center'
+                btnDel.style.justifyContent = 'center'
+                btnDel.style.fontSize = '16px'
+                btnDel.style.border = 'none'
+                btnDel.style.background = 'transparent'
+                btnDel.style.cursor = 'pointer'
                 btnDel.addEventListener('click', () => {
                     keyList.splice(idx, 1)
                     keyList = ensureDefaultKey(keyList)
@@ -1719,6 +2084,26 @@ export async function openSettings(context) {
         renderKeys()
 
         if (elFrom) elFrom.value = cfg.from || '飞速MarkDown'
+        if (elWriteback) elWriteback.checked = cfg.enableWriteback !== false
+        if (elFlagPush) elFlagPush.value = (cfg.pushFlag || '[pushed]')
+        if (elFlagRemind) elFlagRemind.value = (cfg.remindFlag || '[reminded]')
+
+        const syncFlagInputs = () => {
+            const enabled = !elWriteback || !!elWriteback.checked
+            const opacity = enabled ? '1' : '0.5'
+            if (elFlagPush) {
+                elFlagPush.disabled = !enabled
+                elFlagPush.style.opacity = opacity
+            }
+            if (elFlagRemind) {
+                elFlagRemind.disabled = !enabled
+                elFlagRemind.style.opacity = opacity
+            }
+        }
+        syncFlagInputs()
+        if (elWriteback) {
+            elWriteback.addEventListener('change', syncFlagInputs)
+        }
 
         const close = () => {
             try { overlay.remove() } catch {}
@@ -1761,10 +2146,16 @@ export async function openSettings(context) {
 
                 const apiKeys = normalizeApiKeys(keyList)
                 const from = elFrom ? String(elFrom.value || '').trim() || '飞速MarkDown' : '飞速MarkDown'
+                const enableWriteback = elWriteback ? !!elWriteback.checked : true
+                const pushFlag = elFlagPush ? String(elFlagPush.value || '').trim() || '[pushed]' : '[pushed]'
+                const remindFlag = elFlagRemind ? String(elFlagRemind.value || '').trim() || '[reminded]' : '[reminded]'
 
                 const nextCfg = {
                     apiKeys,
-                    from
+                    from,
+                    enableWriteback,
+                    pushFlag,
+                    remindFlag
                 }
 
                 await saveCfg(context, nextCfg)
@@ -1775,14 +2166,14 @@ export async function openSettings(context) {
                 }
 
                 if (context.ui && context.ui.notice) {
-                    context.ui.notice('xxtui 配置已保存（beta）', 'ok', 2000)
+                    context.ui.notice('xxtui 配置已保存', 'ok', 2000)
                 }
                 close()
             })
         }
     } catch (e) {
         if (context && context.ui && context.ui.notice) {
-            context.ui.notice('xxtui 配置保存失败（beta）', 'err', 2600)
+            context.ui.notice('xxtui 配置保存失败', 'err', 2600)
         }
     }
 }
