@@ -8,8 +8,10 @@ import {
   remove,
   writeFile,
   mkdir,
+  writeTextFile,
   BaseDirectory,
   exists,
+  stat,
 } from '@tauri-apps/plugin-fs'
 import { save, open } from '@tauri-apps/plugin-dialog'
 import type { Store } from '@tauri-apps/plugin-store'
@@ -146,6 +148,58 @@ function toPluginAssetUrl(absDir: string | null, relPath: string): string {
   } catch {
     return ''
   }
+}
+
+function pathSep(p: string): string {
+  return p.includes('\\') ? '\\' : '/'
+}
+
+function joinPath(base: string, child: string): string {
+  const s = pathSep(base)
+  return (base.endsWith(s) ? base : base + s) + child
+}
+
+function normalizeRelative(base: string, target: string): string {
+  const baseNorm = String(base || '').replace(/[\\/]+$/, '')
+  const sep = pathSep(baseNorm)
+  let rel = String(target || '')
+  if (rel.toLowerCase().startsWith(baseNorm.toLowerCase())) {
+    rel = rel.slice(baseNorm.length)
+  }
+  if (rel.startsWith(sep)) rel = rel.slice(1)
+  return rel.replace(/\\/g, '/')
+}
+
+function toMtimeMs(meta: any): number {
+  try {
+    const cands = [
+      meta?.modifiedAt,
+      meta?.modifiedTime,
+      meta?.mtimeMs,
+      meta?.mtime,
+      meta?.modificationTime,
+      meta?.st_mtime_ms,
+      meta?.st_mtime,
+      meta?.changedAt,
+      meta?.ctimeMs,
+      meta?.ctime,
+    ]
+    for (const v of cands) {
+      if (v == null) continue
+      if (typeof v === 'number' && Number.isFinite(v)) return v
+      if (typeof v === 'string') {
+        const t = Date.parse(v)
+        if (Number.isFinite(t)) return t
+      }
+      try {
+        if (v instanceof Date) {
+          const t = (v as Date).getTime()
+          if (Number.isFinite(t)) return t
+        }
+      } catch {}
+    }
+  } catch {}
+  return 0
 }
 
 async function readPluginMainCode(p: InstalledPlugin): Promise<string> {
@@ -593,6 +647,110 @@ export function createPluginHost(
             deps.scheduleWysiwygRender()
           }
         } catch {}
+      },
+      readTextFile: async (absPath: string) => {
+        try {
+          const p2 = String(absPath || '').trim()
+          if (!p2) {
+            throw new Error('absPath 不能为空')
+          }
+          return await readTextFile(p2 as any)
+        } catch (e) {
+          console.error(`[Plugin ${p.id}] readTextFile 失败:`, e)
+          throw e
+        }
+      },
+      writeTextFile: async (absPath: string, content: string) => {
+        try {
+          const p2 = String(absPath || '').trim()
+          if (!p2) {
+            throw new Error('absPath 不能为空')
+          }
+          await writeTextFile(p2 as any, String(content ?? ''), {} as any)
+        } catch (e) {
+          console.error(`[Plugin ${p.id}] writeTextFile 失败:`, e)
+          throw e
+        }
+      },
+      listLibraryFiles: async (opt?: {
+        extensions?: string[]
+        maxDepth?: number
+      }) => {
+        const root = await deps.getLibraryRoot()
+        if (!root) {
+          throw new Error('当前未打开任何库')
+        }
+        const base = String(root).replace(/[\\/]+$/, '')
+        const allow = new Set(
+          (opt?.extensions || ['md', 'markdown']).map((x) =>
+            String(x || '').replace(/^\./, '').toLowerCase(),
+          ),
+        )
+        const maxDepth =
+          Number.isFinite(opt?.maxDepth) && opt?.maxDepth !== undefined
+            ? Math.max(0, Number(opt?.maxDepth))
+            : 32
+        const out: Array<{
+          path: string
+          relative: string
+          name: string
+          mtime?: number
+        }> = []
+
+        const walk = async (dir: string, depth: number) => {
+          if (depth < 0) return
+          let entries: any[] = []
+          try {
+            entries = (await readDir(dir, {
+              recursive: false,
+            } as any)) as any[]
+          } catch {
+            entries = []
+          }
+          for (const it of entries || []) {
+            const name = String((it as any)?.name || '').trim()
+            const full: string =
+              typeof (it as any)?.path === 'string' && (it as any)?.path
+                ? (it as any)?.path
+                : joinPath(dir, name || '')
+            let isDir: boolean =
+              (it as any)?.isDirectory !== undefined
+                ? !!(it as any)?.isDirectory
+                : false
+            if ((it as any)?.isDirectory === undefined) {
+              try {
+                const st = (await stat(full as any)) as any
+                isDir = !!st?.isDirectory
+              } catch {
+                isDir = false
+              }
+            }
+            if (isDir) {
+              await walk(full, depth - 1)
+              continue
+            }
+            const nm =
+              name || (full.split(/[\\/]+/).pop() as string) || full
+            const ext = (nm.split('.').pop() || '').toLowerCase()
+            if (allow.size > 0 && !allow.has(ext)) continue
+            const rel = normalizeRelative(base, full)
+            const meta = (it as any)?.metadata
+            out.push({
+              path: full,
+              relative: rel,
+              name: nm,
+              mtime: toMtimeMs(meta),
+            })
+          }
+        }
+
+        await walk(base, maxDepth)
+        out.sort((a, b) =>
+          a.relative.localeCompare(b.relative, 'en', {
+            sensitivity: 'base',
+          }),
+        )
+        return out
       },
       readFileBinary: async (absPath: string) => {
         try {
