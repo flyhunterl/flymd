@@ -4163,11 +4163,31 @@ async function openFile2(preset?: unknown) {
     }
 
     // 兼容 macOS 场景：部分环境下 multiple:false 仍可能返回数组；若为数组取首个
+    const aspFilters = (() => {
+      try {
+        const fn = (pluginHost as any)?.getAdditionalSuffixDialogFilters
+        if (typeof fn !== 'function') return []
+        const list = fn.call(pluginHost)
+        if (!Array.isArray(list)) return []
+        return list
+          .filter((x: any) => x && typeof x === 'object')
+          .map((x: any) => ({
+            name: String(x.name || '').trim() || 'Additional',
+            extensions: Array.isArray(x.extensions)
+              ? x.extensions.map((e: any) => String(e || '')).filter(Boolean)
+              : [],
+          }))
+          .filter((x: any) => x.extensions && x.extensions.length > 0)
+      } catch {
+        return []
+      }
+    })()
     let selected: any = (typeof preset === 'string')
       ? preset
       : (await open({ multiple: false, filters: [
         { name: 'Markdown', extensions: ['md', 'markdown', 'txt'] },
         { name: 'PDF', extensions: ['pdf'] },
+        ...aspFilters,
       ] }))
     if (!selected) return
     if (Array.isArray(selected)) { if (selected.length < 1) return; selected = selected[0] }
@@ -4198,11 +4218,50 @@ async function openFile2(preset?: unknown) {
       // 选择“否”时直接继续切换；取消由 confirmNative 返回 false 的语义中无法区分“否/取消”，因此默认视为不保存继续
     }
 
-    // PDF 预览分支：在读取文本前拦截处理
+    // ASP：根据文件后缀决定打开策略（避免在核心硬编码新后缀）
     try {
       const ext = (selectedPath.split(/\./).pop() || '').toLowerCase()
       if (ext === 'pdf') {
         await showPdfPreview(selectedPath, { updateRecent: true, forceReload: reopeningSameFile })
+        return
+      }
+      const rule = (() => {
+        try {
+          return (pluginHost as any)?.getAdditionalSuffixRule?.(ext) || null
+        } catch {
+          return null
+        }
+      })()
+      if (rule && rule.openWith && rule.openWith.mode === 'plugin') {
+        const target = String(rule.openWith.pluginId || '').trim()
+        const method = String(rule.openWith.method || 'open').trim() || 'open'
+        const api = (() => {
+          try {
+            return (pluginHost as any)?.getPluginAPI?.(target) || null
+          } catch {
+            return null
+          }
+        })()
+        const mod = (() => {
+          try {
+            return (pluginHost as any)?.getActivePluginModule?.(target) || null
+          } catch {
+            return null
+          }
+        })()
+        const fn =
+          (api && typeof api[method] === 'function' ? api[method] : null) ||
+          (mod && typeof mod[method] === 'function' ? mod[method] : null) ||
+          (mod && typeof mod.open === 'function' ? mod.open : null) ||
+          null
+        if (typeof fn === 'function') {
+          await fn(selectedPath)
+          try { await pushRecent(selectedPath as any) } catch {}
+          try { await renderRecentPanel(false) } catch {}
+        } else {
+          const pretty = String(rule.displayName || `.${ext}`) || `.${ext}`
+          pluginNotice(`需要先安装并启用 ${target} 扩展才能打开 ${pretty} 文件`, 'err', 3200)
+        }
         return
       }
     } catch {}
@@ -9158,6 +9217,8 @@ function bindEvents() {
             })
           } catch {}
           await loadAndActivateEnabledPlugins()
+          // 插件可能注册了额外后缀（ASP），刷新文件树以应用过滤与图标规则
+          try { if (fileTreeReady) await fileTree.refresh() } catch {}
           await ensureCoreExtensionsAfterStartup(store, APP_VERSION, activatePlugin)
           // 启动后后台检查一次扩展更新（仅提示，不自动更新）
           await checkPluginUpdatesOnStartup()
@@ -9517,6 +9578,19 @@ const {
   removePluginDir,
   loadAndActivateEnabledPlugins,
 } = pluginRuntime
+
+// ASP：提供给文件树使用的“额外后缀展示配置”查询入口（避免在 fileTree.ts 中直接依赖插件运行时）
+try {
+  ;(window as any).__flymdGetAdditionalSuffixMeta = () => {
+    try {
+      return (pluginHost as any)?.getAdditionalSuffixFileTreeMeta?.() || {}
+    } catch {
+      return {}
+    }
+  }
+} catch {}
+// 若文件树已初始化，则刷新一次以应用新的后缀规则（例如 .zhixu）
+try { if (fileTreeReady) { void fileTree.refresh() } } catch {}
 
 // 插件菜单管理：提供“右键菜单 / 下拉菜单”可见性开关的宿主依赖
 const pluginMenuManagerHost: PluginMenuManagerHost = {

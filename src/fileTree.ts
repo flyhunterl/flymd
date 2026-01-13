@@ -8,10 +8,18 @@ export type FileTreeOptions = {
   onOpenFile: (path: string) => Promise<void> | void
   // 新建文件后打开（用于默认进入编辑态）
   onOpenNewFile?: (path: string) => Promise<void> | void
+  // Additional Suffix Plugin（ASP）：按需扩展文件树的可见后缀与图标
+  // 返回对象 key 为后缀（不带点，建议小写），value 为展示配置
+  getAdditionalSuffixMeta?: () => Promise<Record<string, FileTreeAdditionalSuffixMeta>> | Record<string, FileTreeAdditionalSuffixMeta>
   // 状态变更回调（选中/展开变化时可通知外层）
   onStateChange?: () => void
   // 文件被移动后的通知（用于外层更新当前打开文件路径等）
   onMoved?: (src: string, dst: string) => Promise<void> | void
+}
+
+export type FileTreeAdditionalSuffixMeta = {
+  show?: boolean
+  icon?: 'file' | 'pdf'
 }
 
 export type FileTreeAPI = {
@@ -36,6 +44,56 @@ const state = {
   unwatch: null as null | (() => void),
   sortMode: 'name_asc' as 'name_asc' | 'name_desc' | 'mtime_asc' | 'mtime_desc',
   currentRoot: null as string | null,
+  // ASP：后缀展示配置与 allow-set 缓存（仅在 refresh/render 时更新）
+  additionalSuffixMeta: null as Record<string, FileTreeAdditionalSuffixMeta> | null,
+  additionalSuffixAllow: null as Set<string> | null,
+}
+
+function normalizeSuffixKey(raw: string): string {
+  try {
+    let ext = String(raw || '').trim().toLowerCase()
+    if (ext.startsWith('.')) ext = ext.slice(1)
+    ext = ext.replace(/\s+/g, '').replace(/[^a-z0-9+_-]/g, '')
+    return ext
+  } catch {
+    return ''
+  }
+}
+
+async function updateAdditionalSuffixCache(): Promise<void> {
+  const meta: Record<string, FileTreeAdditionalSuffixMeta> = {}
+  try {
+    const fn =
+      state.opts?.getAdditionalSuffixMeta ||
+      ((window as any).__flymdGetAdditionalSuffixMeta as any)
+    const raw = typeof fn === 'function' ? await fn() : null
+    if (raw && typeof raw === 'object') {
+      for (const [k, v] of Object.entries(raw as any)) {
+        const ext = normalizeSuffixKey(k)
+        if (!ext) continue
+        const item = (v && typeof v === 'object') ? (v as any) : {}
+        const show =
+          typeof item.show === 'boolean' ? item.show : true
+        const icon: 'file' | 'pdf' =
+          item.icon === 'pdf' ? 'pdf' : 'file'
+        meta[ext] = { show, icon }
+      }
+    }
+  } catch {}
+
+  const allow = new Set(['md', 'markdown', 'txt', 'pdf'])
+  for (const [ext, item] of Object.entries(meta)) {
+    if (item && item.show === false) continue
+    allow.add(ext)
+  }
+
+  state.additionalSuffixMeta = meta
+  state.additionalSuffixAllow = allow
+}
+
+async function ensureAdditionalSuffixCache(): Promise<void> {
+  if (state.additionalSuffixMeta && state.additionalSuffixAllow) return
+  await updateAdditionalSuffixCache()
 }
 
 // 文件监听回调可能非常频繁（尤其是 Linux/inotify），必须做去抖与串行化刷新
@@ -386,8 +444,9 @@ async function listDir(root: string, dir: string): Promise<{ name: string; path:
   let ents: any[] = []
   try { ents = await readDir(dir, { recursive: false } as any) as any[] } catch { ents = [] }
   const dirs: { name: string; path: string; isDir: boolean; mtime?: number }[] = []
-  // 仅展示指定后缀的文档（md / markdown / txt / pdf）
-  const allow = new Set(['md', 'markdown', 'txt', 'pdf'])
+  // 仅展示指定后缀的文档（内置 + ASP 扩展）
+  await ensureAdditionalSuffixCache()
+  const allow = state.additionalSuffixAllow || new Set(['md', 'markdown', 'txt', 'pdf'])
   for (const it of ents) {
     const needMtime = (state.sortMode === 'mtime_asc' || state.sortMode === 'mtime_desc')
     const p: string = typeof it?.path === 'string' ? it.path : join(dir, it?.name || '')
@@ -790,12 +849,17 @@ async function buildDir(root: string, dir: string, parent: HTMLElement) {
       // 为文件显示 VS Code 风格的黑白 SVG 图标
       const ext = (() => { try { return (e.name.split('.').pop() || '').toLowerCase() } catch { return '' } })()
       let iconEl: HTMLElement
-      // 根据扩展名选择图标：PDF 使用专用图标，其他使用通用文件图标
-      if (ext === 'pdf') {
-        iconEl = makePdfSvg() as unknown as HTMLElement
-      } else {
-        iconEl = makeFileSvg() as unknown as HTMLElement
-      }
+      // 根据扩展名选择图标：PDF 使用专用图标；ASP 可为额外后缀指定 icon=pdf
+      const aspIcon = (() => {
+        try {
+          const meta = state.additionalSuffixMeta || {}
+          return meta[ext]?.icon
+        } catch {
+          return undefined
+        }
+      })()
+      if (ext === 'pdf' || aspIcon === 'pdf') iconEl = makePdfSvg() as unknown as HTMLElement
+      else iconEl = makeFileSvg() as unknown as HTMLElement
       // 让图标与文字都成为可拖拽起点（某些内核仅触发“被按住元素”的拖拽，不会透传到父元素）
       try { iconEl.setAttribute('draggable', 'true') } catch {}
       try { label.setAttribute('draggable', 'true') } catch {}
@@ -1128,10 +1192,13 @@ async function refreshTree() {
   const root = await state.opts!.getRoot()
   if (!root) {
     if (state.container) state.container.innerHTML = ''
+    state.additionalSuffixMeta = null
+    state.additionalSuffixAllow = null
     return
   }
   state.currentRoot = root
   restoreExpandedState(root)
+  await updateAdditionalSuffixCache()
   // 刷新前清理目录缓存，确保显示与实际文件状态一致
   try { hasDocCache.clear(); hasDocPending.clear() } catch {}
   await renderRoot(root)
@@ -1143,6 +1210,8 @@ async function refresh() {
   if (!root) {
     state.currentRoot = null
     state.expanded = new Set<string>()
+    state.additionalSuffixMeta = null
+    state.additionalSuffixAllow = null
     if (state.container) state.container.innerHTML = ''
     // 清理旧的监听器
     if (state.unwatch) {
@@ -1166,6 +1235,7 @@ async function refresh() {
 
   state.currentRoot = root
   restoreExpandedState(root)
+  await updateAdditionalSuffixCache()
   // 刷新前清理目录缓存，确保显示与实际文件状态一致
   try { hasDocCache.clear(); hasDocPending.clear() } catch {}
   await renderRoot(root)

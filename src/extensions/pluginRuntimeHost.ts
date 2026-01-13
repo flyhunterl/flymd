@@ -109,6 +109,7 @@ export function initPluginRuntime(
   const pluginMenuDisposers = new Map<string, Array<() => void>>() // 每个插件对应的菜单清理函数
   const pluginWatchDisposers = new Map<string, Array<() => void>>() // 每个插件对应的 watch 清理函数
   const pluginAPIRegistry = new Map<string, PluginAPIRecord>() // namespace -> { pluginId, api }
+  const additionalSuffixRegistry = new Map<string, any>() // ext -> rule
   const pluginContextMenuItems: PluginContextMenuItem[] = [] // 所有插件注册的右键菜单项
   const pluginSelectionHandlers = new Map<string, PluginSelectionHandler>()
   const pluginDockPanels = new Map<string, PluginDockPanelState>()
@@ -161,6 +162,7 @@ export function initPluginRuntime(
     pluginMenuDisposers,
     pluginWatchDisposers,
     pluginAPIRegistry,
+    additionalSuffixRegistry,
     pluginContextMenuItems,
     pluginSelectionHandlers,
     pluginDockPanels,

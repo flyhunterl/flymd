@@ -65,12 +65,41 @@ export type PluginDockPanelHandle = {
 
 type PluginAPIRecord = { pluginId: string; api: any }
 
+export type AdditionalSuffixOpenWith =
+  | { mode: 'markdown' }
+  | { mode: 'plugin'; pluginId: string; method?: string }
+
+export type AdditionalSuffixFileTreeRule = {
+  show?: boolean
+  icon?: 'file' | 'pdf'
+}
+
+export type AdditionalSuffixRegisterSpec = {
+  // 需要支持的后缀（不带点，或带点均可）
+  extensions: string[]
+  // 用于“打开文件”对话框的显示名称（可选）；未提供时将使用 ".ext"
+  displayName?: string
+  // 文件树展示控制（可选）
+  fileTree?: AdditionalSuffixFileTreeRule
+  // 打开方式（可选，默认 markdown）
+  openWith?: AdditionalSuffixOpenWith
+}
+
+export type AdditionalSuffixRuleRecord = {
+  ownerPluginId: string
+  ext: string
+  displayName: string
+  fileTree: { show: boolean; icon: 'file' | 'pdf' }
+  openWith: AdditionalSuffixOpenWith
+}
+
 export type PluginHostState = {
   activePlugins: Map<string, any>
   pluginMenuAdded: Map<string, boolean>
   pluginMenuDisposers: Map<string, Array<() => void>>
   pluginWatchDisposers: Map<string, Array<() => void>>
   pluginAPIRegistry: Map<string, PluginAPIRecord>
+  additionalSuffixRegistry: Map<string, AdditionalSuffixRuleRecord>
   pluginContextMenuItems: PluginContextMenuItem[]
   pluginSelectionHandlers: Map<string, PluginSelectionHandler>
   pluginDockPanels: Map<string, PluginDockPanelState>
@@ -112,6 +141,9 @@ export type PluginHost = {
   deactivatePlugin: (id: string) => Promise<void>
   getActivePluginModule: (id: string) => any
   getPluginAPI: (namespace: string) => any | null
+  getAdditionalSuffixRule: (ext: string) => AdditionalSuffixRuleRecord | null
+  getAdditionalSuffixFileTreeMeta: () => Record<string, AdditionalSuffixFileTreeRule>
+  getAdditionalSuffixDialogFilters: () => Array<{ name: string; extensions: string[] }>
   getContextMenuItems: () => PluginContextMenuItem[]
   openPluginSettings: (p: InstalledPlugin) => Promise<void>
 }
@@ -877,6 +909,123 @@ export function createPluginHost(
             return await deps.confirmNative(m, '确认')
           } catch {
             return false
+          }
+        },
+      },
+      asp: {
+        register: (spec: AdditionalSuffixRegisterSpec) => {
+          try {
+            const rawExts = (spec && Array.isArray(spec.extensions))
+              ? spec.extensions
+              : []
+            if (!rawExts.length) {
+              console.warn(
+                `[Plugin ${p.id}] asp.register: extensions 不能为空`,
+              )
+              return
+            }
+
+            const normalizeExt = (raw: string): string => {
+              let ext = String(raw || '').trim().toLowerCase()
+              if (ext.startsWith('.')) ext = ext.slice(1)
+              ext = ext.replace(/\s+/g, '')
+              // 仅允许非常常见的扩展名字符集，避免奇怪输入影响文件路径逻辑
+              ext = ext.replace(/[^a-z0-9+_-]/g, '')
+              return ext
+            }
+
+            const reserved = new Set(['md', 'markdown', 'txt', 'pdf'])
+
+            const displayNameRaw = String(spec.displayName || '').trim()
+            const treeShow =
+              typeof spec.fileTree?.show === 'boolean'
+                ? spec.fileTree.show
+                : true
+            const treeIconRaw = spec.fileTree?.icon
+            const treeIcon: 'file' | 'pdf' =
+              treeIconRaw === 'pdf' ? 'pdf' : 'file'
+
+            const openWith: AdditionalSuffixOpenWith = (() => {
+              const ow: any = spec.openWith
+              if (!ow || typeof ow !== 'object') return { mode: 'markdown' }
+              if (ow.mode === 'plugin') {
+                const pid = String(ow.pluginId || '').trim()
+                if (!pid) return { mode: 'markdown' }
+                const method = String(ow.method || '').trim() || undefined
+                return { mode: 'plugin', pluginId: pid, method }
+              }
+              return { mode: 'markdown' }
+            })()
+
+            for (const raw of rawExts) {
+              const ext = normalizeExt(raw)
+              if (!ext) continue
+              if (reserved.has(ext)) {
+                console.warn(
+                  `[Plugin ${p.id}] asp.register: 忽略内置后缀 "${ext}"`,
+                )
+                continue
+              }
+
+              const displayName =
+                displayNameRaw || `.${ext}`
+
+              const existing = state.additionalSuffixRegistry.get(ext)
+              if (existing && existing.ownerPluginId !== p.id) {
+                console.warn(
+                  `[Plugin ${p.id}] asp.register: 后缀 "${ext}" 已被插件 "${existing.ownerPluginId}" 注册，跳过`,
+                )
+                continue
+              }
+
+              const record: AdditionalSuffixRuleRecord = {
+                ownerPluginId: p.id,
+                ext,
+                displayName,
+                fileTree: { show: treeShow, icon: treeIcon },
+                openWith,
+              }
+              state.additionalSuffixRegistry.set(ext, record)
+              console.log(
+                `[Plugin ${p.id}] asp.register: 已注册后缀 "${ext}"`,
+              )
+            }
+          } catch (e) {
+            console.error(
+              `[Plugin ${p.id}] asp.register 失败:`,
+              e,
+            )
+          }
+        },
+        unregister: (rawExt: string) => {
+          try {
+            let ext = String(rawExt || '').trim().toLowerCase()
+            if (ext.startsWith('.')) ext = ext.slice(1)
+            ext = ext.replace(/\s+/g, '').replace(/[^a-z0-9+_-]/g, '')
+            if (!ext) return
+            const record = state.additionalSuffixRegistry.get(ext)
+            if (!record) return
+            if (record.ownerPluginId !== p.id) return
+            state.additionalSuffixRegistry.delete(ext)
+            console.log(`[Plugin ${p.id}] asp.unregister: 已移除后缀 "${ext}"`)
+          } catch (e) {
+            console.error(`[Plugin ${p.id}] asp.unregister 失败:`, e)
+          }
+        },
+        unregisterAll: () => {
+          try {
+            const toRemove: string[] = []
+            for (const [ext, record] of state.additionalSuffixRegistry.entries()) {
+              if (record && record.ownerPluginId === p.id) toRemove.push(ext)
+            }
+            for (const ext of toRemove) {
+              state.additionalSuffixRegistry.delete(ext)
+            }
+            if (toRemove.length) {
+              console.log(`[Plugin ${p.id}] asp.unregisterAll: 已移除 ${toRemove.length} 个后缀`)
+            }
+          } catch (e) {
+            console.error(`[Plugin ${p.id}] asp.unregisterAll 失败:`, e)
           }
         },
       },
@@ -2037,6 +2186,18 @@ export function createPluginHost(
         console.log(`[Plugin ${id}] 已移除 API: ${namespace}`)
       }
     } catch {}
+    try {
+      const extsToRemove: string[] = []
+      for (const [ext, record] of state.additionalSuffixRegistry.entries()) {
+        if (record.ownerPluginId === id) {
+          extsToRemove.push(ext)
+        }
+      }
+      for (const ext of extsToRemove) {
+        state.additionalSuffixRegistry.delete(ext)
+        console.log(`[Plugin ${id}] 已移除后缀: ${ext}`)
+      }
+    } catch {}
   }
 
   function getActivePluginModule(id: string): any {
@@ -2047,6 +2208,47 @@ export function createPluginHost(
     if (!namespace || typeof namespace !== 'string') return null
     const record = state.pluginAPIRegistry.get(namespace)
     return record?.api ?? null
+  }
+
+  function getAdditionalSuffixRule(ext: string): AdditionalSuffixRuleRecord | null {
+    try {
+      let e = String(ext || '').trim().toLowerCase()
+      if (e.startsWith('.')) e = e.slice(1)
+      e = e.replace(/\s+/g, '').replace(/[^a-z0-9+_-]/g, '')
+      if (!e) return null
+      return state.additionalSuffixRegistry.get(e) || null
+    } catch {
+      return null
+    }
+  }
+
+  function getAdditionalSuffixFileTreeMeta(): Record<string, AdditionalSuffixFileTreeRule> {
+    const out: Record<string, AdditionalSuffixFileTreeRule> = {}
+    try {
+      for (const rec of state.additionalSuffixRegistry.values()) {
+        out[rec.ext] = { show: rec.fileTree.show, icon: rec.fileTree.icon }
+      }
+    } catch {}
+    return out
+  }
+
+  function getAdditionalSuffixDialogFilters(): Array<{ name: string; extensions: string[] }> {
+    const groups = new Map<string, Set<string>>()
+    try {
+      for (const rec of state.additionalSuffixRegistry.values()) {
+        const name = String(rec.displayName || `.${rec.ext}`) || `.${rec.ext}`
+        const set = groups.get(name) || new Set<string>()
+        set.add(rec.ext)
+        groups.set(name, set)
+      }
+    } catch {}
+    const list: Array<{ name: string; extensions: string[] }> = []
+    for (const [name, set] of groups.entries()) {
+      const exts = Array.from(set.values())
+      if (!exts.length) continue
+      list.push({ name, extensions: exts })
+    }
+    return list
   }
 
   function getContextMenuItems(): PluginContextMenuItem[] {
@@ -2060,6 +2262,97 @@ export function createPluginHost(
       const ctx = {
         http,
         invoke,
+        asp: {
+          register: (spec: AdditionalSuffixRegisterSpec) => {
+            try {
+              const rawExts = (spec && Array.isArray(spec.extensions))
+                ? spec.extensions
+                : []
+              if (!rawExts.length) {
+                console.warn(
+                  `[Plugin ${p.id}] asp.register: extensions 不能为空`,
+                )
+                return
+              }
+
+              const normalizeExt = (raw: string): string => {
+                let ext = String(raw || '').trim().toLowerCase()
+                if (ext.startsWith('.')) ext = ext.slice(1)
+                ext = ext.replace(/\s+/g, '')
+                ext = ext.replace(/[^a-z0-9+_-]/g, '')
+                return ext
+              }
+
+              const reserved = new Set(['md', 'markdown', 'txt', 'pdf'])
+              const displayNameRaw = String(spec.displayName || '').trim()
+              const treeShow =
+                typeof spec.fileTree?.show === 'boolean'
+                  ? spec.fileTree.show
+                  : true
+              const treeIconRaw = spec.fileTree?.icon
+              const treeIcon: 'file' | 'pdf' =
+                treeIconRaw === 'pdf' ? 'pdf' : 'file'
+              const openWith: AdditionalSuffixOpenWith = (() => {
+                const ow: any = spec.openWith
+                if (!ow || typeof ow !== 'object') return { mode: 'markdown' }
+                if (ow.mode === 'plugin') {
+                  const pid = String(ow.pluginId || '').trim()
+                  if (!pid) return { mode: 'markdown' }
+                  const method = String(ow.method || '').trim() || undefined
+                  return { mode: 'plugin', pluginId: pid, method }
+                }
+                return { mode: 'markdown' }
+              })()
+
+              for (const raw of rawExts) {
+                const ext = normalizeExt(raw)
+                if (!ext) continue
+                if (reserved.has(ext)) continue
+
+                const displayName = displayNameRaw || `.${ext}`
+
+                const existing = state.additionalSuffixRegistry.get(ext)
+                if (existing && existing.ownerPluginId !== p.id) continue
+
+                const record: AdditionalSuffixRuleRecord = {
+                  ownerPluginId: p.id,
+                  ext,
+                  displayName,
+                  fileTree: { show: treeShow, icon: treeIcon },
+                  openWith,
+                }
+                state.additionalSuffixRegistry.set(ext, record)
+              }
+            } catch (e) {
+              console.error(`[Plugin ${p.id}] asp.register 失败:`, e)
+            }
+          },
+          unregister: (rawExt: string) => {
+            try {
+              let ext = String(rawExt || '').trim().toLowerCase()
+              if (ext.startsWith('.')) ext = ext.slice(1)
+              ext = ext.replace(/\s+/g, '').replace(/[^a-z0-9+_-]/g, '')
+              if (!ext) return
+              const record = state.additionalSuffixRegistry.get(ext)
+              if (!record) return
+              if (record.ownerPluginId !== p.id) return
+              state.additionalSuffixRegistry.delete(ext)
+            } catch (e) {
+              console.error(`[Plugin ${p.id}] asp.unregister 失败:`, e)
+            }
+          },
+          unregisterAll: () => {
+            try {
+              const toRemove: string[] = []
+              for (const [ext, record] of state.additionalSuffixRegistry.entries()) {
+                if (record && record.ownerPluginId === p.id) toRemove.push(ext)
+              }
+              for (const ext of toRemove) state.additionalSuffixRegistry.delete(ext)
+            } catch (e) {
+              console.error(`[Plugin ${p.id}] asp.unregisterAll 失败:`, e)
+            }
+          },
+        },
         storage: {
           get: async (key: string) => {
             try {
@@ -2185,6 +2478,9 @@ export function createPluginHost(
     deactivatePlugin,
     getActivePluginModule,
     getPluginAPI,
+    getAdditionalSuffixRule,
+    getAdditionalSuffixFileTreeMeta,
+    getAdditionalSuffixDialogFilters,
     getContextMenuItems,
     openPluginSettings,
   }
