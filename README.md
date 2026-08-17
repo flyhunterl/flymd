@@ -415,7 +415,7 @@ FlyMD 拥有丰富的插件生态,支持通过扩展插件无限扩展功能。
 
 ### Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=flyhunterl/flymd&type=date&legend=top-left)](https://www.star-history.com/#flyhunterl/flymd&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=flyhunterl/flymd&type=date&legend=top-left)](https://star-history.dera.page/#flyhunterl/flymd&type=date&legend=top-left)
 
 ### 许可协议
 
